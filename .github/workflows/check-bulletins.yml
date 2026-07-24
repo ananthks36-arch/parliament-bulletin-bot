@@ -1,0 +1,38 @@
+name: Check Parliament Bulletins
+
+on:
+  schedule:
+    # Every 15 min, 06:00-16:59 UTC = ~11:30am-10:29pm IST.
+    # Covers typical sitting hours + the 1-2hr delay after adjournment.
+    - cron: "*/15 6-16 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check for new bulletins
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: python check_bulletins.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "bulletin-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || git commit -m "Update bulletin state"
+          git push
