@@ -1,10 +1,10 @@
 # Parliament Bulletin Bot
 
 Checks the official Parliament of India site (`sansad.in`) for today's Lok Sabha and
-Rajya Sabha business documents — List of Business, Revised List of Business,
-Bulletin-I, Bulletin-II, Questions List(s), Synopsis, Papers to be Laid — and posts each
-PDF into a Slack channel as soon as it's published. Bulletins typically land 1-2 hours
-after the House adjourns for the day; the others through the course of the sitting day.
+Rajya Sabha **List of Business**, **Revised List of Business**, **Bulletin-I**, and
+**Bulletin-II**, and posts each PDF into a Slack channel as soon as it's published.
+Bulletins typically land 1-2 hours after the House adjourns for the day; the Lists of
+Business are usually out before/around the start of the sitting.
 
 Runs on a GitHub Actions schedule. No server, no paid hosting — free on a public repo.
 
@@ -16,10 +16,10 @@ documents, each with a direct PDF link (`null` until published):
 - Lok Sabha: `https://sansad.in/api_ls/ppHome/DailyCalendar?day=D&month=M&year=Y&locale=en`
 - Rajya Sabha: `https://sansad.in/api_rs/ppHome/DailyCalendar?day=D&month=M&year=Y&locale=en`
 
-The two houses' responses aren't shaped identically (LS nests some documents as single
-objects, RS as lists — e.g. two Questions List entries, three Synopsis slots), so
-`check_bulletins.py` walks the response generically: any `{name, url}` object found
-anywhere in it, with a non-null url, counts as a document.
+The response also includes Questions List(s), Synopsis, and Papers to be Laid, which
+this bot deliberately ignores — `check_bulletins.py` walks the response generically
+(the two houses shape it differently: LS nests documents as single objects, RS as
+lists) and keeps only entries whose name contains "list of business" or "bulletin".
 
 It polls both every 15 minutes (03:00-16:59 UTC, i.e. ~8:30am-10:30pm IST) via a GitHub
 Actions cron schedule, and for any document URL it hasn't posted before (tracked in

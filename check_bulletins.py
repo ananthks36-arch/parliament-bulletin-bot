@@ -1,9 +1,8 @@
 """Check today's Lok Sabha / Rajya Sabha business documents, post any new ones to Slack.
 
-Covers the full "regular set" the DailyCalendar API returns for the day: List of
-Business, Revised List of Business, Bulletin-I, Bulletin-II, Questions List(s),
-Synopsis (+ supplements), Papers to be Laid — whatever fields are present and have
-a non-null url, for either house.
+Only List of Business, Revised List of Business, and Bulletin-I/II are wanted —
+Questions List(s), Synopsis, and Papers to be Laid are filtered out even though the
+API returns them alongside the rest.
 """
 
 import json
@@ -36,20 +35,24 @@ HOUSES = {
 }
 
 
+WANTED_NAME_SUBSTRINGS = ("list of business", "bulletin")
+
+
 def extract_documents(data):
-    """Flatten every {name, url, ...} entry in the DailyCalendar response.
+    """Flatten every {name, url, ...} entry in the DailyCalendar response, keeping
+    only List of Business / Revised List of Business / Bulletin-I / Bulletin-II.
 
     The API mixes single objects (e.g. bulletin1Url) and lists of objects (e.g.
     questionListUrls) across LS/RS, and some slots are null until published. This
-    walks every top-level value generically instead of hardcoding each key, so any
-    document in the "regular set" is picked up automatically.
+    walks every top-level value generically rather than hardcoding each key, then
+    filters by name so only the wanted document types survive.
     """
     docs = []
 
     def handle(item):
         if isinstance(item, dict):
             url, name = item.get("url"), item.get("name")
-            if url and name:
+            if url and name and any(s in name.lower() for s in WANTED_NAME_SUBSTRINGS):
                 docs.append((name, url))
 
     for value in data.values():
