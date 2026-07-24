@@ -53,13 +53,16 @@ git branch -M main
 git push -u origin main
 ```
 
-## 3. Add repo secrets
+## 3. Add the token as a secret and the channel ID as a variable
 
-In the GitHub repo: **Settings → Secrets and variables → Actions → New repository
-secret**. Add two:
+In the GitHub repo: **Settings → Secrets and variables → Actions**.
 
-- `SLACK_BOT_TOKEN` — the `xoxb-...` token from step 1.
-- `SLACK_CHANNEL_ID` — the channel ID from step 1.
+- **Secrets** tab → **New repository secret** → name `PARLIAMENT_SLACK_BOT_TOKEN`,
+  value the `xoxb-...` token from step 1. (Not named `SLACK_BOT_TOKEN` — that name was
+  already taken in this repo.)
+- **Variables** tab → **New repository variable** → name `SLACK_CHANNEL_ID`, value the
+  channel ID from step 1. This one isn't secret, just an identifier, so it's a plain
+  variable rather than an encrypted secret.
 
 ## 4. Allow the workflow to commit state back
 
