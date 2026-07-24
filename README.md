@@ -1,23 +1,30 @@
 # Parliament Bulletin Bot
 
 Checks the official Parliament of India site (`sansad.in`) for today's Lok Sabha and
-Rajya Sabha **Bulletin-I** and **Bulletin-II**, and posts each PDF into a Slack channel
-as soon as it's published — usually 1-2 hours after the House adjourns for the day.
+Rajya Sabha business documents — List of Business, Revised List of Business,
+Bulletin-I, Bulletin-II, Questions List(s), Synopsis, Papers to be Laid — and posts each
+PDF into a Slack channel as soon as it's published. Bulletins typically land 1-2 hours
+after the House adjourns for the day; the others through the course of the sitting day.
 
 Runs on a GitHub Actions schedule. No server, no paid hosting — free on a public repo.
 
 ## How it works
 
 `sansad.in` exposes a plain JSON endpoint per house that lists today's business
-documents, including the bulletins, with a direct PDF link (`null` until published):
+documents, each with a direct PDF link (`null` until published):
 
 - Lok Sabha: `https://sansad.in/api_ls/ppHome/DailyCalendar?day=D&month=M&year=Y&locale=en`
 - Rajya Sabha: `https://sansad.in/api_rs/ppHome/DailyCalendar?day=D&month=M&year=Y&locale=en`
 
-`check_bulletins.py` polls both every 15 minutes (06:00-16:59 UTC, i.e. ~11:30am-10:30pm
-IST) via a GitHub Actions cron schedule, and for any bulletin URL it hasn't posted before
-(tracked in `state.json`, committed back to the repo after each run), it downloads the
-PDF and uploads it to Slack.
+The two houses' responses aren't shaped identically (LS nests some documents as single
+objects, RS as lists — e.g. two Questions List entries, three Synopsis slots), so
+`check_bulletins.py` walks the response generically: any `{name, url}` object found
+anywhere in it, with a non-null url, counts as a document.
+
+It polls both every 15 minutes (03:00-16:59 UTC, i.e. ~8:30am-10:30pm IST) via a GitHub
+Actions cron schedule, and for any document URL it hasn't posted before (tracked in
+`state.json`, committed back to the repo after each run), it downloads the PDF and
+uploads it to Slack.
 
 ## 1. Create a Slack app
 

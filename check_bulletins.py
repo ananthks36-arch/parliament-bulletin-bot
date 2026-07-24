@@ -1,7 +1,14 @@
-"""Check Lok Sabha / Rajya Sabha Bulletin I & II for today, post any new ones to Slack."""
+"""Check today's Lok Sabha / Rajya Sabha business documents, post any new ones to Slack.
+
+Covers the full "regular set" the DailyCalendar API returns for the day: List of
+Business, Revised List of Business, Bulletin-I, Bulletin-II, Questions List(s),
+Synopsis (+ supplements), Papers to be Laid — whatever fields are present and have
+a non-null url, for either house.
+"""
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -28,10 +35,30 @@ HOUSES = {
     },
 }
 
-BULLETIN_KEYS = {
-    "bulletin1Url": "Bulletin-I",
-    "bulletin2Url": "Bulletin-II",
-}
+
+def extract_documents(data):
+    """Flatten every {name, url, ...} entry in the DailyCalendar response.
+
+    The API mixes single objects (e.g. bulletin1Url) and lists of objects (e.g.
+    questionListUrls) across LS/RS, and some slots are null until published. This
+    walks every top-level value generically instead of hardcoding each key, so any
+    document in the "regular set" is picked up automatically.
+    """
+    docs = []
+
+    def handle(item):
+        if isinstance(item, dict):
+            url, name = item.get("url"), item.get("name")
+            if url and name:
+                docs.append((name, url))
+
+    for value in data.values():
+        if isinstance(value, list):
+            for item in value:
+                handle(item)
+        else:
+            handle(value)
+    return docs
 
 
 def load_state():
@@ -93,11 +120,7 @@ def main():
             print(f"[{house['label']}] failed to fetch daily calendar: {e}")
             continue
 
-        for json_key, label in BULLETIN_KEYS.items():
-            entry = data.get(json_key)
-            if not entry or not entry.get("url"):
-                continue
-            url = entry["url"]
+        for label, url in extract_documents(data):
             if url in posted:
                 continue
 
@@ -108,7 +131,8 @@ def main():
                 print(f"  failed to download: {e}")
                 continue
 
-            filename = f"{house_key.upper()}_{label.replace('-', '')}_{date_str}.pdf"
+            safe_label = re.sub(r"[^A-Za-z0-9]+", "", label)
+            filename = f"{house_key.upper()}_{safe_label}_{date_str}.pdf"
             title = f"{house['label']} {label} — {date_str}"
 
             try:
@@ -125,7 +149,7 @@ def main():
     save_state(state)
 
     if not found_new:
-        print("No new bulletins this run.")
+        print("No new documents this run.")
 
 
 if __name__ == "__main__":

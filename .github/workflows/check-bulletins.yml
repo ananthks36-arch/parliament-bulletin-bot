@@ -2,9 +2,10 @@ name: Check Parliament Bulletins
 
 on:
   schedule:
-    # Every 15 min, 06:00-16:59 UTC = ~11:30am-10:29pm IST.
-    # Covers typical sitting hours + the 1-2hr delay after adjournment.
-    - cron: "*/15 6-16 * * *"
+    # Every 15 min, 03:00-16:59 UTC = ~8:30am-10:29pm IST.
+    # Starts before the House sits (List of Business is published that morning)
+    # and runs through the 1-2hr delay after adjournment (Bulletins).
+    - cron: "*/15 3-16 * * *"
   workflow_dispatch: {}
 
 permissions:
