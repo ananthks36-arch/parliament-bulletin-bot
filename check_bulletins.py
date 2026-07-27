@@ -8,6 +8,7 @@ Checks today plus a few days ahead (see LOOKAHEAD_DAYS), since List of Business 
 sitting day is usually published the evening before, not on the day itself.
 """
 
+import io
 import json
 import os
 import re
@@ -15,9 +16,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import anthropic
 import requests
+from pypdf import PdfReader
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+
+SUMMARY_MODEL = "claude-haiku-4-5"
+SUMMARY_MAX_CHARS = 40000  # cap PDF text sent for summarization
 
 IST = ZoneInfo("Asia/Kolkata")
 STATE_FILE = Path(__file__).parent / "state.json"
@@ -101,13 +107,51 @@ def download_pdf(url):
     return resp.content
 
 
-def post_to_slack(client, channel, filename, title, pdf_bytes):
+def extract_pdf_text(pdf_bytes):
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def summarize_bulletin(anthropic_client, house_label, doc_label, pdf_bytes):
+    """Summarize a Bulletin PDF's key items via Claude. Returns None on any failure
+    (missing API key, empty text, API error) so a summarization problem never blocks
+    posting the PDF itself."""
+    if anthropic_client is None:
+        return None
+    text = extract_pdf_text(pdf_bytes).strip()
+    if not text:
+        return None
+    try:
+        resp = anthropic_client.messages.create(
+            model=SUMMARY_MODEL,
+            max_tokens=400,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"This is the {house_label} {doc_label} for today's sitting of "
+                    "Parliament of India. Write a short summary as 4-8 bullet points "
+                    "highlighting the most notable items — bills introduced or "
+                    "discussed, important questions, motions, or notices. Skip "
+                    "routine or procedural boilerplate. Be concise, plain text, no "
+                    "markdown headers.\n\n"
+                    f"Document text:\n{text[:SUMMARY_MAX_CHARS]}"
+                ),
+            }],
+        )
+        return "".join(b.text for b in resp.content if b.type == "text").strip() or None
+    except Exception as e:
+        print(f"  summarization failed: {e}")
+        return None
+
+
+def post_to_slack(client, channel, filename, title, pdf_bytes, summary=None):
+    comment = f"{title}\n\n{summary}" if summary else title
     client.files_upload_v2(
         channel=channel,
         filename=filename,
         title=title,
         content=pdf_bytes,
-        initial_comment=title,
+        initial_comment=comment,
     )
 
 
@@ -115,6 +159,12 @@ def main():
     slack_token = os.environ["SLACK_BOT_TOKEN"]
     channel = os.environ["SLACK_CHANNEL_ID"]
     client = WebClient(token=slack_token)
+
+    anthropic_client = (
+        anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        if os.environ.get("ANTHROPIC_API_KEY")
+        else None
+    )
 
     state = load_state()
     posted = set(state["posted_urls"])
@@ -152,8 +202,12 @@ def main():
                 if target_date > today:
                     title += " (published in advance, for that day's sitting)"
 
+                summary = None
+                if "bulletin" in label.lower():
+                    summary = summarize_bulletin(anthropic_client, house["label"], label, pdf_bytes)
+
                 try:
-                    post_to_slack(client, channel, filename, title, pdf_bytes)
+                    post_to_slack(client, channel, filename, title, pdf_bytes, summary)
                 except SlackApiError as e:
                     print(f"  failed to post to Slack: {e.response['error']}")
                     continue

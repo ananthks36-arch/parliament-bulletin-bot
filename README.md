@@ -26,6 +26,12 @@ Actions cron schedule, and for any document URL it hasn't posted before (tracked
 `state.json`, committed back to the repo after each run), it downloads the PDF and
 uploads it to Slack.
 
+For each Bulletin (not List of Business — that's just an agenda, not worth summarizing),
+it also extracts the PDF text and asks Claude (Haiku 4.5, chosen for its low cost) for a
+short bullet-point summary of the notable items, posted alongside the PDF. If the
+`ANTHROPIC_API_KEY` secret isn't set, or the summarization call fails for any reason, the
+bot still posts the PDF — the summary is a nice-to-have, never a blocker.
+
 ## 1. Create a Slack app
 
 1. Go to <https://api.slack.com/apps> → **Create New App** → **From scratch**.
@@ -71,13 +77,23 @@ In the GitHub repo: **Settings → Secrets and variables → Actions**.
   channel ID from step 1. This one isn't secret, just an identifier, so it's a plain
   variable rather than an encrypted secret.
 
-## 4. Allow the workflow to commit state back
+## 4. (Optional) Add an Anthropic API key for bulletin summaries
+
+Without this, the bot still posts every PDF — it just skips the summary blurb.
+
+1. Get a key from <https://console.anthropic.com/settings/keys> (**Create Key**).
+2. Add it as a repo secret: **Settings → Secrets and variables → Actions → Secrets tab
+   → New repository secret** → name `ANTHROPIC_API_KEY`, value the key.
+3. Cost is small — Bulletin summaries use Claude Haiku 4.5, roughly $0.01-0.02 per
+   bulletin, so a few cents a month even on a busy sitting.
+
+## 5. Allow the workflow to commit state back
 
 The bot commits `state.json` after each run so it doesn't repost the same bulletin.
 Enable this in: **Settings → Actions → General → Workflow permissions** → select
 **Read and write permissions** → Save.
 
-## 5. Test it
+## 6. Test it
 
 Go to the **Actions** tab → **Check Parliament Bulletins** → **Run workflow** to trigger
 it manually. Check the run logs — during Parliament's inter-session periods or before a
