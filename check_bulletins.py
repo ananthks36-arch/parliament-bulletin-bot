@@ -1,14 +1,17 @@
-"""Check today's Lok Sabha / Rajya Sabha business documents, post any new ones to Slack.
+"""Check Lok Sabha / Rajya Sabha business documents, post any new ones to Slack.
 
 Only List of Business, Revised List of Business, and Bulletin-I/II are wanted —
 Questions List(s), Synopsis, and Papers to be Laid are filtered out even though the
 API returns them alongside the rest.
+
+Checks today plus a few days ahead (see LOOKAHEAD_DAYS), since List of Business for a
+sitting day is usually published the evening before, not on the day itself.
 """
 
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -36,6 +39,12 @@ HOUSES = {
 
 
 WANTED_NAME_SUBSTRINGS = ("list of business", "bulletin")
+
+# List of Business for a sitting day is typically published the evening before, not
+# on the day itself — so also check a few days ahead, not just today. Bulletins are
+# never published in advance, so this is a no-op for them (the API just returns null
+# for future dates until the day is adjourned).
+LOOKAHEAD_DAYS = 3
 
 
 def extract_documents(data):
@@ -110,43 +119,48 @@ def main():
     state = load_state()
     posted = set(state["posted_urls"])
 
-    now = datetime.now(IST)
-    day, month, year = now.day, now.month, now.year
-    date_str = now.strftime("%d-%m-%Y")
+    today = datetime.now(IST).date()
+    target_dates = [today + timedelta(days=offset) for offset in range(LOOKAHEAD_DAYS + 1)]
 
     found_new = False
 
     for house_key, house in HOUSES.items():
-        try:
-            data = fetch_daily_calendar(house["api"], day, month, year)
-        except Exception as e:
-            print(f"[{house['label']}] failed to fetch daily calendar: {e}")
-            continue
-
-        for label, url in extract_documents(data):
-            if url in posted:
-                continue
-
-            print(f"[{house['label']}] new {label} found: {url}")
+        for target_date in target_dates:
             try:
-                pdf_bytes = download_pdf(url)
+                data = fetch_daily_calendar(
+                    house["api"], target_date.day, target_date.month, target_date.year
+                )
             except Exception as e:
-                print(f"  failed to download: {e}")
+                print(f"[{house['label']}] failed to fetch {target_date}: {e}")
                 continue
 
-            safe_label = re.sub(r"[^A-Za-z0-9]+", "", label)
-            filename = f"{house_key.upper()}_{safe_label}_{date_str}.pdf"
-            title = f"{house['label']} {label} — {date_str}"
+            for label, url in extract_documents(data):
+                if url in posted:
+                    continue
 
-            try:
-                post_to_slack(client, channel, filename, title, pdf_bytes)
-            except SlackApiError as e:
-                print(f"  failed to post to Slack: {e.response['error']}")
-                continue
+                print(f"[{house['label']}] new {label} found for {target_date}: {url}")
+                try:
+                    pdf_bytes = download_pdf(url)
+                except Exception as e:
+                    print(f"  failed to download: {e}")
+                    continue
 
-            posted.add(url)
-            found_new = True
-            print(f"  posted to Slack as {filename}")
+                date_str = target_date.strftime("%d-%m-%Y")
+                safe_label = re.sub(r"[^A-Za-z0-9]+", "", label)
+                filename = f"{house_key.upper()}_{safe_label}_{date_str}.pdf"
+                title = f"{house['label']} {label} — {date_str}"
+                if target_date > today:
+                    title += " (published in advance, for that day's sitting)"
+
+                try:
+                    post_to_slack(client, channel, filename, title, pdf_bytes)
+                except SlackApiError as e:
+                    print(f"  failed to post to Slack: {e.response['error']}")
+                    continue
+
+                posted.add(url)
+                found_new = True
+                print(f"  posted to Slack as {filename}")
 
     state["posted_urls"] = list(posted)
     save_state(state)
