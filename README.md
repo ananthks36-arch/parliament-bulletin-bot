@@ -1,6 +1,6 @@
 # Parliament Bulletin Bot
 
-Checks the official Parliament of India site (`sansad.in`) for today's Lok Sabha and
+Checks the official Parliament of India site (`sansad.in`) for Lok Sabha and
 Rajya Sabha **List of Business**, **Revised List of Business**, **Bulletin-I**, and
 **Bulletin-II**, and posts each PDF into a Slack channel as soon as it's published.
 Bulletins typically land 1-2 hours after the House adjourns for the day; the Lists of
@@ -21,10 +21,13 @@ this bot deliberately ignores — `check_bulletins.py` walks the response generi
 (the two houses shape it differently: LS nests documents as single objects, RS as
 lists) and keeps only entries whose name contains "list of business" or "bulletin".
 
-It polls both every 15 minutes (03:00-16:59 UTC, i.e. ~8:30am-10:30pm IST) via a GitHub
-Actions cron schedule, and for any document URL it hasn't posted before (tracked in
-`state.json`, committed back to the repo after each run), it downloads the PDF and
-uploads it to Slack.
+It polls both every 15 minutes from 8:00am through approximately 3:30am IST via a
+GitHub Actions cron schedule. Every run checks a rolling seven-day window: the previous
+three sitting dates, today, and the next three dates. The lookback catches bulletins
+uploaded after midnight following a late sitting; the lookahead catches Lists of
+Business published in advance. For any document URL it hasn't posted before (tracked
+in `state.json`, committed back to the repo after each run), it downloads the PDF and
+uploads it to Slack using the document date returned by the API.
 
 For each Bulletin (not List of Business — that's just an agenda, not worth summarizing),
 it also extracts the PDF text and asks Claude (Haiku 4.5, chosen for its low cost) for a
@@ -112,7 +115,10 @@ Once the workflow runs successfully, it's fully automated on the schedule in
 - **Schedule**: GitHub's cron scheduler isn't second-precise and can lag a few minutes
   under load, and GitHub auto-disables scheduled workflows after 60 days with no repo
   activity — push any commit (or just re-enable it from the Actions tab) if that happens.
-- **Adjusting the polling window**: edit the `cron` line in
+- **Late-night safety**: each run revisits the previous three dates, so a temporary
+  API/download failure or an upload after midnight remains eligible until successfully
+  posted. Previously posted URLs are deduplicated.
+- **Adjusting the polling window**: edit the `cron` lines in
   `.github/workflows/check-bulletins.yml`. Times are UTC; IST is UTC+5:30.
 - **Weekends/recess**: the script runs every day regardless of whether Parliament is
   sitting — the API just returns `null` bulletin URLs and the script exits without

@@ -4,8 +4,8 @@ Only List of Business, Revised List of Business, and Bulletin-I/II are wanted â€
 Questions List(s), Synopsis, and Papers to be Laid are filtered out even though the
 API returns them alongside the rest.
 
-Checks today plus a few days ahead (see LOOKAHEAD_DAYS), since List of Business for a
-sitting day is usually published the evening before, not on the day itself.
+Checks a rolling window around today: previous sitting dates catch documents uploaded
+after midnight, while future dates catch Lists of Business published in advance.
 """
 
 import io
@@ -51,9 +51,31 @@ WANTED_NAME_SUBSTRINGS = ("list of business", "bulletin")
 # never published in advance, so this is a no-op for them (the API just returns null
 # for future dates until the day is adjourned).
 LOOKAHEAD_DAYS = 3
+LOOKBACK_DAYS = 3
 
 
-def extract_documents(data):
+def parse_document_date(value, fallback):
+    """Return the API document date, tolerating the formats used by LS and RS."""
+    if not value:
+        return fallback
+    date_text = str(value).split()[0]
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_text, fmt).date()
+        except ValueError:
+            pass
+    return fallback
+
+
+def build_target_dates(today):
+    """Include recent sitting dates and advance publication dates."""
+    return [
+        today + timedelta(days=offset)
+        for offset in range(-LOOKBACK_DAYS, LOOKAHEAD_DAYS + 1)
+    ]
+
+
+def extract_documents(data, fallback_date=None):
     """Flatten every {name, url, ...} entry in the DailyCalendar response, keeping
     only List of Business / Revised List of Business / Bulletin-I / Bulletin-II.
 
@@ -68,7 +90,7 @@ def extract_documents(data):
         if isinstance(item, dict):
             url, name = item.get("url"), item.get("name")
             if url and name and any(s in name.lower() for s in WANTED_NAME_SUBSTRINGS):
-                docs.append((name, url))
+                docs.append((name, url, parse_document_date(item.get("date"), fallback_date)))
 
     for value in data.values():
         if isinstance(value, list):
@@ -167,15 +189,17 @@ def main():
     )
 
     state = load_state()
-    posted = set(state["posted_urls"])
+    posted_urls = list(state["posted_urls"])
+    posted = set(posted_urls)
 
     today = datetime.now(IST).date()
-    target_dates = [today + timedelta(days=offset) for offset in range(LOOKAHEAD_DAYS + 1)]
+    target_dates = build_target_dates(today)
 
     found_new = False
 
     for house_key, house in HOUSES.items():
         for target_date in target_dates:
+            print(f"[{house['label']}] checking sitting date {target_date}")
             try:
                 data = fetch_daily_calendar(
                     house["api"], target_date.day, target_date.month, target_date.year
@@ -184,22 +208,27 @@ def main():
                 print(f"[{house['label']}] failed to fetch {target_date}: {e}")
                 continue
 
-            for label, url in extract_documents(data):
+            documents = extract_documents(data, target_date)
+            if not documents:
+                print(f"[{house['label']}] no wanted documents for {target_date}")
+
+            for label, url, document_date in documents:
                 if url in posted:
+                    print(f"[{house['label']}] already posted {label} for {document_date}")
                     continue
 
-                print(f"[{house['label']}] new {label} found for {target_date}: {url}")
+                print(f"[{house['label']}] new {label} found for {document_date}: {url}")
                 try:
                     pdf_bytes = download_pdf(url)
                 except Exception as e:
                     print(f"  failed to download: {e}")
                     continue
 
-                date_str = target_date.strftime("%d-%m-%Y")
+                date_str = document_date.strftime("%d-%m-%Y")
                 safe_label = re.sub(r"[^A-Za-z0-9]+", "", label)
                 filename = f"{house_key.upper()}_{safe_label}_{date_str}.pdf"
                 title = f"{house['label']} {label} â€” {date_str}"
-                if target_date > today:
+                if document_date > today:
                     title += " (published in advance, for that day's sitting)"
 
                 summary = None
@@ -213,10 +242,11 @@ def main():
                     continue
 
                 posted.add(url)
+                posted_urls.append(url)
                 found_new = True
                 print(f"  posted to Slack as {filename}")
 
-    state["posted_urls"] = list(posted)
+    state["posted_urls"] = posted_urls
     save_state(state)
 
     if not found_new:

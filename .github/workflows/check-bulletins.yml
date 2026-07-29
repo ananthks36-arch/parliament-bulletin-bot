@@ -2,10 +2,11 @@ name: Check Parliament Bulletins
 
 on:
   schedule:
-    # Every 15 min, 03:00-16:59 UTC = ~8:30am-10:29pm IST.
-    # Starts before the House sits (List of Business is published that morning)
-    # and runs through the 1-2hr delay after adjournment (Bulletins).
-    - cron: "*/15 3-16 * * *"
+    # Every 15 min, 02:30-21:45 UTC = 8:00am-3:15am IST.
+    # The overnight window catches bulletins uploaded after unusually late sittings;
+    # the 8am run also acts as a daily catch-up.
+    - cron: "*/15 3-21 * * *"
+    - cron: "30,45 2 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -23,6 +24,9 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
 
       - name: Check for new bulletins
         env:
