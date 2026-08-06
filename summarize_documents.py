@@ -18,12 +18,15 @@ from pypdf import PdfReader
 from slack_sdk import WebClient
 from check_bulletins import STATE_FILE, download_pdf, save_state
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
-SUMMARY_MODEL = os.environ.get("SUMMARY_MODEL", "qwen3:4b")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
+SUMMARY_MODEL = os.environ.get("SUMMARY_MODEL", "qwen2.5:3b")
 MIN_EXTRACTED_CHARS = 500
 MAX_SOURCE_CHARS = 70000
 MAX_OCR_PAGES = 25
 MAX_ATTEMPTS = 3
+PAGE_CITATION = re.compile(
+    r"\(pp?\.\s*\d+(?:\s*[-–]\s*\d+)?\)[.!]?\s*$", re.IGNORECASE
+)
 
 
 def extract_pdf_text(pdf_bytes):
@@ -106,8 +109,7 @@ def build_prompt(job, document_text, comparison_text=None):
     if comparison_text:
         original_section = f"\n\nORIGINAL LIST OF BUSINESS:\n{source_excerpt(comparison_text)}"
 
-    return f"""/no_think
-You are summarizing an official Parliament of India document for a reader who wants
+    return f"""You are summarizing an official Parliament of India document for a reader who wants
 the practical meaning, not procedural boilerplate.
 
 Document: {job['house']} {label}, dated {job['date']}.
@@ -115,7 +117,12 @@ Task: {task}
 
 Rules:
 - Use only the supplied document text. Do not invent names, events, outcomes, or context.
-- Give 4-8 concise bullets in strict descending importance—not document/page order.
+- Give 4-6 concise, single-line bullets in strict descending importance—not
+  document/page order. Do not use sub-bullets.
+- Scan the entire document, including its final pages, before selecting bullets.
+  Explicitly look for "passed", "adopted", "negatived", "introduced", bills,
+  statutory resolutions, and binding decisions; do not omit these in favour of
+  routine papers, references, questions, committee listings, or adjournment.
 - Rank passed/defeated/introduced bills and binding decisions first; then substantive
   motions and resolutions; major policy, financial, or regulatory matters; important
   committee findings; ministerial statements; matters raised by members; and routine
@@ -125,11 +132,14 @@ Rules:
 - You may add a short plain-English significance sentence, but label it "Context:" and
   keep it limited to what follows directly from the document.
 - If the text is insufficient, say so explicitly.
+- Start the response immediately with the first "- " bullet.
 - Return only the reader-facing bullets and optional Context sentence. Never output
   analysis, chain-of-thought, <think> tags, a heading, or a preamble.
 
 CURRENT/REVISED DOCUMENT:
 {source_excerpt(document_text)}{original_section}
+
+Return the reader-facing summary now.
 """
 
 
@@ -138,15 +148,21 @@ def generate_summary(prompt):
         OLLAMA_URL,
         json={
             "model": SUMMARY_MODEL,
-            "prompt": prompt,
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
             "think": False,
-            "options": {"temperature": 0.1, "num_ctx": 32768, "num_predict": 700},
+            "options": {"temperature": 0.0, "num_ctx": 32768, "num_predict": 900},
         },
         timeout=900,
     )
     response.raise_for_status()
-    return clean_model_output(response.json().get("response", ""))
+    payload = response.json()
+    raw = (payload.get("message") or {}).get("content", "").lstrip()
+    # The prompt supplies the first bullet marker as a completion prefix. Ollama
+    # returns only the continuation, so restore that marker before validation.
+    if raw and not raw.startswith(("- ", "• ")):
+        raw = "- " + raw
+    return validate_summary(clean_model_output(raw))
 
 
 def clean_model_output(text):
@@ -155,7 +171,20 @@ def clean_model_output(text):
     if "</think>" in cleaned.lower():
         cleaned = re.split(r"</think>", cleaned, flags=re.IGNORECASE)[-1]
     cleaned = re.sub(r"```(?:markdown)?|```", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.replace("**", "")
     return cleaned.strip()
+
+
+def validate_summary(text):
+    """Allow only finished, cited bullets; reject reasoning and prose monologues."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    bullets = [line for line in lines if line.startswith(("- ", "• "))]
+    contexts = [line for line in lines if line.startswith("Context:")]
+    if not 4 <= len(bullets) <= 6:
+        raise ValueError("summary must contain 4-6 bullets")
+    if len(lines) != len(bullets) + len(contexts) or len(contexts) > 1:
+        raise ValueError("summary contains non-bullet commentary")
+    return "\n".join(lines)
 
 
 def text_from_url(url):

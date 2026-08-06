@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ollama/models
-          key: ollama-qwen3-4b-q4-v1
+          key: ollama-qwen25-3b-q4-v1
 
       - name: Start local Qwen summarizer and OCR tools
         if: steps.detect.outputs.needs_summary == 'true'
@@ -64,13 +64,13 @@ jobs:
             curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break
             sleep 1
           done
-          ollama pull qwen3:4b
+          ollama pull qwen2.5:3b
 
       - name: Generate and post local summaries
         if: steps.detect.outputs.needs_summary == 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.PARLIAMENT_SLACK_BOT_TOKEN }}
-          SUMMARY_MODEL: qwen3:4b
+          SUMMARY_MODEL: qwen2.5:3b
         run: python summarize_documents.py
 
       - name: Commit updated summary state

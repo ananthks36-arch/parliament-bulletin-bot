@@ -1,6 +1,12 @@
 import unittest
 
-from summarize_documents import build_prompt, clean_model_output, post_summary, source_excerpt
+from summarize_documents import (
+    build_prompt,
+    clean_model_output,
+    post_summary,
+    source_excerpt,
+    validate_summary,
+)
 
 
 class LocalSummaryTests(unittest.TestCase):
@@ -17,6 +23,18 @@ class LocalSummaryTests(unittest.TestCase):
     def test_standalone_summary_is_refused(self):
         with self.assertRaisesRegex(ValueError, "refusing a standalone"):
             post_summary(object(), {"channel": "C123"}, "- Summary. (p. 1)")
+
+    def test_reasoning_monologue_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "4-6 bullets"):
+            validate_summary("Hmm, I need to decide what the user wants.")
+
+    def test_only_cited_bullets_are_accepted(self):
+        summary = "- Bill passed. (p. 4)\n- Motion defeated. (p. 3)\n- Policy announced. (p. 6)\n- House adjourned. (p. 8)"
+        self.assertEqual(validate_summary(summary), summary)
+
+    def test_clean_uncited_bullets_are_allowed(self):
+        summary = "- Bill passed.\n- Motion defeated.\n- Policy announced.\n- House adjourned."
+        self.assertEqual(validate_summary(summary), summary)
 
     def test_revised_list_prompt_requires_evidenced_comparison(self):
         job = {
