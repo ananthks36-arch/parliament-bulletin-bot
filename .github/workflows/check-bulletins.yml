@@ -2,12 +2,15 @@ name: Check Parliament Bulletins
 
 on:
   schedule:
-    # Every 15 min, 02:30-21:45 UTC = 8:00am-3:15am IST.
-    # The overnight window catches bulletins uploaded after unusually late sittings;
-    # the 8am run also acts as a daily catch-up.
-    - cron: "*/15 3-21 * * *"
-    - cron: "30,45 2 * * *"
+    # Every 5 min at off-peak minute marks, 08:02am-03:27am IST.
+    # Avoiding :00 reduces GitHub scheduler congestion; runs remain best-effort.
+    - cron: "2-57/5 3-21 * * *"
+    - cron: "32-57/5 2 * * *"
   workflow_dispatch: {}
+
+concurrency:
+  group: parliament-document-poller
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -28,14 +31,49 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
 
-      - name: Check for new bulletins
+      - name: Check for new documents and upload PDFs immediately
+        id: detect
         env:
           SLACK_BOT_TOKEN: ${{ secrets.PARLIAMENT_SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python check_bulletins.py
 
-      - name: Commit updated state
+      - name: Commit PDF delivery state before optional AI work
+        run: |
+          git config user.name "bulletin-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || git commit -m "Update delivered document state"
+          git push
+
+      - name: Restore local Qwen model cache
+        if: steps.detect.outputs.needs_summary == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama/models
+          key: ollama-qwen3-4b-q4-v1
+
+      - name: Start local Qwen summarizer and OCR tools
+        if: steps.detect.outputs.needs_summary == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq poppler-utils tesseract-ocr
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for attempt in {1..30}; do
+            curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break
+            sleep 1
+          done
+          ollama pull qwen3:4b
+
+      - name: Generate and post local summaries
+        if: steps.detect.outputs.needs_summary == 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.PARLIAMENT_SLACK_BOT_TOKEN }}
+          SUMMARY_MODEL: qwen3:4b
+        run: python summarize_documents.py
+
+      - name: Commit updated summary state
         run: |
           git config user.name "bulletin-bot"
           git config user.email "actions@users.noreply.github.com"

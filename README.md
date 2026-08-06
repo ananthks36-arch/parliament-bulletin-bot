@@ -21,7 +21,7 @@ this bot deliberately ignores — `check_bulletins.py` walks the response generi
 (the two houses shape it differently: LS nests documents as single objects, RS as
 lists) and keeps only entries whose name contains "list of business" or "bulletin".
 
-It polls both every 15 minutes from 8:00am through approximately 3:30am IST via a
+It polls both every 5 minutes from approximately 8:02am through 3:27am IST via a
 GitHub Actions cron schedule. Every run checks a rolling seven-day window: the previous
 three sitting dates, today, and the next three dates. The lookback catches bulletins
 uploaded after midnight following a late sitting; the lookahead catches Lists of
@@ -29,11 +29,19 @@ Business published in advance. For any document URL it hasn't posted before (tra
 in `state.json`, committed back to the repo after each run), it downloads the PDF and
 uploads it to Slack using the document date returned by the API.
 
-For each Bulletin (not List of Business — that's just an agenda, not worth summarizing),
-it also extracts the PDF text and asks Claude (Haiku 4.5, chosen for its low cost) for a
-short bullet-point summary of the notable items, posted alongside the PDF. If the
-`ANTHROPIC_API_KEY` secret isn't set, or the summarization call fails for any reason, the
-bot still posts the PDF — the summary is a nice-to-have, never a blocker.
+The PDF is always posted first. For each Revised List of Business and Bulletin I/II,
+the workflow then runs the open-source Qwen3 4B model locally through Ollama and posts
+a grounded, page-referenced summary beneath the document (threaded when Slack returns
+the upload message timestamp). Revised Lists are compared with the original List of
+Business. Scanned PDFs fall back to local Tesseract OCR. No AI API, AI account, or AI
+API key is required. Failed summaries are retried up to three times and never block or
+repeat PDF delivery.
+
+Sansad sometimes replaces a PDF with a fresh URL without meaningfully changing its
+contents. The bot deduplicates by house + sitting date + document type and compares a
+normalized-text fingerprint. URL/metadata-only replacements are suppressed; genuinely
+changed text is posted with an explicit “updated version” label. Near-identical
+replacements at or above 99% word-level similarity are treated as rehashes.
 
 ## 1. Create a Slack app
 
@@ -80,23 +88,13 @@ In the GitHub repo: **Settings → Secrets and variables → Actions**.
   channel ID from step 1. This one isn't secret, just an identifier, so it's a plain
   variable rather than an encrypted secret.
 
-## 4. (Optional) Add an Anthropic API key for bulletin summaries
-
-Without this, the bot still posts every PDF — it just skips the summary blurb.
-
-1. Get a key from <https://console.anthropic.com/settings/keys> (**Create Key**).
-2. Add it as a repo secret: **Settings → Secrets and variables → Actions → Secrets tab
-   → New repository secret** → name `ANTHROPIC_API_KEY`, value the key.
-3. Cost is small — Bulletin summaries use Claude Haiku 4.5, roughly $0.01-0.02 per
-   bulletin, so a few cents a month even on a busy sitting.
-
-## 5. Allow the workflow to commit state back
+## 4. Allow the workflow to commit state back
 
 The bot commits `state.json` after each run so it doesn't repost the same bulletin.
 Enable this in: **Settings → Actions → General → Workflow permissions** → select
 **Read and write permissions** → Save.
 
-## 6. Test it
+## 5. Test it
 
 Go to the **Actions** tab → **Check Parliament Bulletins** → **Run workflow** to trigger
 it manually. Check the run logs — during Parliament's inter-session periods or before a
@@ -109,12 +107,13 @@ Once the workflow runs successfully, it's fully automated on the schedule in
 ## Notes
 
 - **Cost**: $0/month in the normal case — public repo, no browser automation, each run
-  takes a few seconds. Comfortably within even a private repo's free 2,000 Actions
-  minutes/month if you'd rather keep it private (adjust the repo secrets/permissions
-  steps accordingly).
+  uses a standard GitHub-hosted runner, and the local Qwen model needs no paid API.
+  Model installation only runs when a summary is pending; its ~2.5 GB weights are
+  cached between runs.
 - **Schedule**: GitHub's cron scheduler isn't second-precise and can lag a few minutes
-  under load, and GitHub auto-disables scheduled workflows after 60 days with no repo
-  activity — push any commit (or just re-enable it from the Actions tab) if that happens.
+  under load. Off-hour minute marks reduce congestion, but GitHub schedules remain
+  best-effort. GitHub auto-disables scheduled workflows after 60 days with no repo
+  activity—push any commit (or re-enable it from Actions) if that happens.
 - **Late-night safety**: each run revisits the previous three dates, so a temporary
   API/download failure or an upload after midnight remains eligible until successfully
   posted. Previously posted URLs are deduplicated.

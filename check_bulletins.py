@@ -8,22 +8,20 @@ Checks a rolling window around today: previous sitting dates catch documents upl
 after midnight, while future dates catch Lists of Business published in advance.
 """
 
-import io
 import json
+import hashlib
+import io
+from difflib import SequenceMatcher
 import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import anthropic
 import requests
 from pypdf import PdfReader
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-
-SUMMARY_MODEL = "claude-haiku-4-5"
-SUMMARY_MAX_CHARS = 40000  # cap PDF text sent for summarization
 
 IST = ZoneInfo("Asia/Kolkata")
 STATE_FILE = Path(__file__).parent / "state.json"
@@ -52,6 +50,7 @@ WANTED_NAME_SUBSTRINGS = ("list of business", "bulletin")
 # for future dates until the day is adjourned).
 LOOKAHEAD_DAYS = 3
 LOOKBACK_DAYS = 3
+REHASH_SIMILARITY_THRESHOLD = 0.99
 
 
 def parse_document_date(value, fallback):
@@ -112,6 +111,14 @@ def save_state(state):
     STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
 
 
+def write_workflow_output(name, value):
+    """Expose a value to later GitHub Actions steps; harmless during local runs."""
+    output_file = os.environ.get("GITHUB_OUTPUT")
+    if output_file:
+        with open(output_file, "a", encoding="utf-8") as handle:
+            handle.write(f"{name}={value}\n")
+
+
 def fetch_daily_calendar(api_url, day, month, year):
     resp = requests.get(
         api_url,
@@ -129,52 +136,69 @@ def download_pdf(url):
     return resp.content
 
 
-def extract_pdf_text(pdf_bytes):
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
-
-
-def summarize_bulletin(anthropic_client, house_label, doc_label, pdf_bytes):
-    """Summarize a Bulletin PDF's key items via Claude. Returns None on any failure
-    (missing API key, empty text, API error) so a summarization problem never blocks
-    posting the PDF itself."""
-    if anthropic_client is None:
-        return None
-    text = extract_pdf_text(pdf_bytes).strip()
-    if not text:
-        return None
-    try:
-        resp = anthropic_client.messages.create(
-            model=SUMMARY_MODEL,
-            max_tokens=400,
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"This is the {house_label} {doc_label} for today's sitting of "
-                    "Parliament of India. Write a short summary as 4-8 bullet points "
-                    "highlighting the most notable items — bills introduced or "
-                    "discussed, important questions, motions, or notices. Skip "
-                    "routine or procedural boilerplate. Be concise, plain text, no "
-                    "markdown headers.\n\n"
-                    f"Document text:\n{text[:SUMMARY_MAX_CHARS]}"
-                ),
-            }],
-        )
-        return "".join(b.text for b in resp.content if b.type == "text").strip() or None
-    except Exception as e:
-        print(f"  summarization failed: {e}")
-        return None
-
-
-def post_to_slack(client, channel, filename, title, pdf_bytes, summary=None):
-    comment = f"{title}\n\n{summary}" if summary else title
-    client.files_upload_v2(
+def post_to_slack(client, channel, filename, title, pdf_bytes):
+    """Upload immediately; summary generation deliberately happens afterwards."""
+    return client.files_upload_v2(
         channel=channel,
         filename=filename,
         title=title,
         content=pdf_bytes,
-        initial_comment=comment,
+        initial_comment=title,
     )
+
+
+def get_upload_message_ts(response):
+    """Best-effort extraction of the Slack message containing an uploaded file."""
+    file_info = response.get("file")
+    if not file_info:
+        files = response.get("files") or []
+        file_info = files[0] if files else {}
+    for visibility in ("public", "private"):
+        for shares in (file_info.get("shares") or {}).get(visibility, {}).values():
+            if shares and shares[0].get("ts"):
+                return shares[0]["ts"]
+    return None
+
+
+def should_summarize(label):
+    lowered = label.lower()
+    return "bulletin" in lowered or "revised list of business" in lowered
+
+
+def find_original_list_url(documents):
+    for label, url, _ in documents:
+        if label.strip().lower() == "list of business":
+            return url
+    return None
+
+
+def document_key(house_key, label, document_date):
+    """Stable identity even when Sansad replaces a PDF with a fresh URL."""
+    normalized_label = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    return f"{house_key}:{document_date.isoformat()}:{normalized_label}"
+
+
+def pdf_normalized_text(pdf_bytes):
+    """Extract visible text while removing layout-only whitespace differences."""
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return re.sub(r"\s+", " ", text).strip().casefold()
+    except Exception as error:
+        print(f"  could not extract text for fingerprint: {error}")
+        return ""
+
+
+def pdf_text_fingerprint(pdf_bytes):
+    normalized = pdf_normalized_text(pdf_bytes)
+    source = normalized.encode("utf-8") if normalized else pdf_bytes
+    return hashlib.sha256(source).hexdigest()
+
+
+def text_similarity(first, second):
+    if not first or not second:
+        return 0.0
+    return SequenceMatcher(None, first.split(), second.split()).ratio()
 
 
 def main():
@@ -182,15 +206,12 @@ def main():
     channel = os.environ["SLACK_CHANNEL_ID"]
     client = WebClient(token=slack_token)
 
-    anthropic_client = (
-        anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        if os.environ.get("ANTHROPIC_API_KEY")
-        else None
-    )
-
     state = load_state()
     posted_urls = list(state["posted_urls"])
     posted = set(posted_urls)
+    pending_summaries = list(state.get("pending_summaries", []))
+    pending_urls = {job["url"] for job in pending_summaries}
+    posted_documents = dict(state.get("posted_documents", {}))
 
     today = datetime.now(IST).date()
     target_dates = build_target_dates(today)
@@ -211,10 +232,13 @@ def main():
             documents = extract_documents(data, target_date)
             if not documents:
                 print(f"[{house['label']}] no wanted documents for {target_date}")
+            original_list_url = find_original_list_url(documents)
 
             for label, url, document_date in documents:
+                identity = document_key(house_key, label, document_date)
                 if url in posted:
                     print(f"[{house['label']}] already posted {label} for {document_date}")
+                    posted_documents.setdefault(identity, {"url": url})
                     continue
 
                 print(f"[{house['label']}] new {label} found for {document_date}: {url}")
@@ -224,30 +248,94 @@ def main():
                     print(f"  failed to download: {e}")
                     continue
 
+                fingerprint = pdf_text_fingerprint(pdf_bytes)
+                normalized_text = pdf_normalized_text(pdf_bytes)
+                previous = posted_documents.get(identity)
+                is_updated_version = False
+                if previous:
+                    previous_fingerprint = previous.get("text_fingerprint")
+                    previous_text = ""
+                    comparison_failed = False
+                    if previous.get("url") and previous_fingerprint != fingerprint:
+                        try:
+                            previous_bytes = download_pdf(previous["url"])
+                            previous_fingerprint = pdf_text_fingerprint(previous_bytes)
+                            previous_text = pdf_normalized_text(previous_bytes)
+                        except Exception as error:
+                            print(f"  could not compare previous version: {error}")
+                            comparison_failed = True
+
+                    posted.add(url)
+                    posted_urls.append(url)
+                    similarity = text_similarity(previous_text, normalized_text)
+                    if (
+                        not previous_fingerprint
+                        or previous_fingerprint == fingerprint
+                        or comparison_failed
+                        or similarity >= REHASH_SIMILARITY_THRESHOLD
+                    ):
+                        print(
+                            "  suppressed replacement URL with unchanged/near-identical "
+                            f"text (similarity={similarity:.4f})"
+                        )
+                        posted_documents[identity] = {
+                            "url": url,
+                            "text_fingerprint": fingerprint,
+                        }
+                        continue
+                    is_updated_version = True
+                    print("  document text changed; posting a clearly labelled update")
+
                 date_str = document_date.strftime("%d-%m-%Y")
                 safe_label = re.sub(r"[^A-Za-z0-9]+", "", label)
                 filename = f"{house_key.upper()}_{safe_label}_{date_str}.pdf"
                 title = f"{house['label']} {label} — {date_str}"
                 if document_date > today:
                     title += " (published in advance, for that day's sitting)"
-
-                summary = None
-                if "bulletin" in label.lower():
-                    summary = summarize_bulletin(anthropic_client, house["label"], label, pdf_bytes)
+                if is_updated_version:
+                    title += " (updated version)"
 
                 try:
-                    post_to_slack(client, channel, filename, title, pdf_bytes, summary)
+                    upload = post_to_slack(client, channel, filename, title, pdf_bytes)
                 except SlackApiError as e:
                     print(f"  failed to post to Slack: {e.response['error']}")
                     continue
 
                 posted.add(url)
-                posted_urls.append(url)
+                if url not in posted_urls:
+                    posted_urls.append(url)
+                posted_documents[identity] = {
+                    "url": url,
+                    "text_fingerprint": fingerprint,
+                }
                 found_new = True
                 print(f"  posted to Slack as {filename}")
 
+                if should_summarize(label) and url not in pending_urls:
+                    pending_summaries.append(
+                        {
+                            "url": url,
+                            "comparison_url": (
+                                original_list_url
+                                if "revised list of business" in label.lower()
+                                else None
+                            ),
+                            "house": house["label"],
+                            "label": label,
+                            "date": date_str,
+                            "channel": channel,
+                            "thread_ts": get_upload_message_ts(upload),
+                            "attempts": 0,
+                        }
+                    )
+                    pending_urls.add(url)
+                    print("  queued for local Qwen summary")
+
     state["posted_urls"] = posted_urls
+    state["posted_documents"] = posted_documents
+    state["pending_summaries"] = pending_summaries
     save_state(state)
+    write_workflow_output("needs_summary", str(bool(pending_summaries)).lower())
 
     if not found_new:
         print("No new documents this run.")

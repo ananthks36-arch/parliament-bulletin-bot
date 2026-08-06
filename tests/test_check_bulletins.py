@@ -1,7 +1,15 @@
 from datetime import date
 import unittest
 
-from check_bulletins import build_target_dates, extract_documents, parse_document_date
+from check_bulletins import (
+    build_target_dates,
+    document_key,
+    extract_documents,
+    get_upload_message_ts,
+    parse_document_date,
+    should_summarize,
+    text_similarity,
+)
 
 
 class DocumentExtractionTests(unittest.TestCase):
@@ -48,6 +56,41 @@ class DocumentExtractionTests(unittest.TestCase):
         self.assertEqual(dates[0], date(2026, 7, 26))
         self.assertIn(date(2026, 7, 28), dates)
         self.assertEqual(dates[-1], date(2026, 8, 1))
+
+    def test_document_identity_does_not_depend_on_source_url(self):
+        self.assertEqual(
+            document_key("rs", "Revised List of Business", date(2026, 8, 6)),
+            "rs:2026-08-06:revised-list-of-business",
+        )
+
+    def test_only_revised_lists_and_bulletins_are_summarized(self):
+        self.assertTrue(should_summarize("Revised List of Business"))
+        self.assertTrue(should_summarize("Bulletin Part-I"))
+        self.assertFalse(should_summarize("List of Business"))
+        self.assertFalse(should_summarize("Supplementary List of Business-1"))
+
+    def test_extracts_upload_message_timestamp_for_threaded_summary(self):
+        response = {
+            "file": {
+                "shares": {
+                    "public": {"C123": [{"ts": "1234567890.123456"}]}
+                }
+            }
+        }
+
+        self.assertEqual(get_upload_message_ts(response), "1234567890.123456")
+
+    def test_rehash_with_tiny_text_noise_is_near_identical(self):
+        original = " ".join(f"word-{index}" for index in range(3000))
+        replacement = original.replace("word-1500", "word-1500 Indian", 1)
+
+        self.assertGreater(text_similarity(original, replacement), 0.99)
+
+    def test_material_revision_is_not_near_identical(self):
+        original = " ".join(f"agenda-{index}" for index in range(1000))
+        revision = " ".join(f"different-{index}" for index in range(1000))
+
+        self.assertLess(text_similarity(original, revision), 0.99)
 
 
 if __name__ == "__main__":
