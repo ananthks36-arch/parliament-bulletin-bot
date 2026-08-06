@@ -166,13 +166,28 @@ def generate_summary(prompt):
 
 
 def clean_model_output(text):
-    """Remove any reasoning markup before text can reach Slack."""
+    """Keep only reader-facing bullets/context before text can reach Slack."""
     cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
     if "</think>" in cleaned.lower():
         cleaned = re.split(r"</think>", cleaned, flags=re.IGNORECASE)[-1]
     cleaned = re.sub(r"```(?:markdown)?|```", "", cleaned, flags=re.IGNORECASE)
     cleaned = cleaned.replace("**", "")
-    return cleaned.strip()
+    bullets = []
+    context = None
+    for raw_line in cleaned.splitlines():
+        line = raw_line.strip()
+        numbered = re.match(r"^\d+[.)]\s+(.+)$", line)
+        if numbered:
+            line = "- " + numbered.group(1)
+        elif line.startswith("• "):
+            line = "- " + line[2:]
+        if line.startswith("- ") and len(bullets) < 6:
+            bullets.append(line)
+        elif line.startswith("Context:") and context is None:
+            context = line
+    if context:
+        bullets.append(context)
+    return "\n".join(bullets)
 
 
 def validate_summary(text):
@@ -180,8 +195,8 @@ def validate_summary(text):
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     bullets = [line for line in lines if line.startswith(("- ", "• "))]
     contexts = [line for line in lines if line.startswith("Context:")]
-    if not 4 <= len(bullets) <= 6:
-        raise ValueError("summary must contain 4-6 bullets")
+    if not 3 <= len(bullets) <= 6:
+        raise ValueError("summary must contain 3-6 bullets")
     if len(lines) != len(bullets) + len(contexts) or len(contexts) > 1:
         raise ValueError("summary contains non-bullet commentary")
     return "\n".join(lines)

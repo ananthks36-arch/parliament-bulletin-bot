@@ -25,8 +25,15 @@ class LocalSummaryTests(unittest.TestCase):
             post_summary(object(), {"channel": "C123"}, "- Summary. (p. 1)")
 
     def test_reasoning_monologue_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "4-6 bullets"):
+        with self.assertRaisesRegex(ValueError, "3-6 bullets"):
             validate_summary("Hmm, I need to decide what the user wants.")
+
+    def test_cleaner_discards_prose_and_normalizes_numbered_bullets(self):
+        raw = "Planning text\n1. Bill passed. (p. 4)\n2. Motion defeated. (p. 3)\n3. House adjourned. (p. 8)"
+        self.assertEqual(
+            clean_model_output(raw),
+            "- Bill passed. (p. 4)\n- Motion defeated. (p. 3)\n- House adjourned. (p. 8)",
+        )
 
     def test_only_cited_bullets_are_accepted(self):
         summary = "- Bill passed. (p. 4)\n- Motion defeated. (p. 3)\n- Policy announced. (p. 6)\n- House adjourned. (p. 8)"
