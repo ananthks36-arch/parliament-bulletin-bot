@@ -16,6 +16,8 @@ class LocalSummaryTests(unittest.TestCase):
         prompt = build_prompt(job, "[Page 1]\nProceedings")
         self.assertIn("strict descending importance", prompt)
         self.assertIn("binding decisions first", prompt)
+        self.assertIn("If a bill passed, say the bill", prompt)
+        self.assertIn("reporting deadline was adopted", prompt)
 
     def test_hidden_reasoning_is_removed(self):
         raw = "<think>private reasoning</think>\n- Bill passed. (p. 4)"
@@ -45,12 +47,21 @@ class LocalSummaryTests(unittest.TestCase):
         self.assertEqual(validate_summary(summary), summary)
 
     def test_slack_format_bolds_leads_and_spaces_bullets(self):
-        summary = "- Bill passed: Tax law amended. (p. 4)\n- Motion defeated: Ordinance remains. (p. 3)\nContext: These were the main outcomes."
+        summary = "- Bill passed: Tax law amended. (p. 4)\n- Motion defeated: Ordinance remains. (p. 3)"
         rendered = format_summary_for_slack(summary)
         self.assertIn("*Summary — most important first*", rendered)
         self.assertIn("• *Bill passed:* Tax law amended. (p. 4)", rendered)
         self.assertIn("\n\n• *Motion defeated:*", rendered)
-        self.assertIn("*Why it matters:* These were the main outcomes.", rendered)
+        self.assertNotIn("Why it matters", rendered)
+
+    def test_slack_format_does_not_double_bold_existing_lead(self):
+        rendered = format_summary_for_slack("- *Bill passed:* Tax law amended.")
+        self.assertIn("• *Bill passed:* Tax law amended.", rendered)
+        self.assertNotIn("**Bill passed", rendered)
+
+    def test_context_is_removed_from_model_output(self):
+        raw = "- Bill passed.\n- Motion defeated.\n- Policy announced.\nContext: Extra interpretation."
+        self.assertNotIn("Context:", clean_model_output(raw))
 
     def test_revised_list_prompt_requires_evidenced_comparison(self):
         job = {

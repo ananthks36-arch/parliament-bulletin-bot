@@ -122,6 +122,14 @@ Rules:
 - Write for an intelligent reader who does not know parliamentary jargon. Use active
   voice, short sentences, and concrete consequences. Avoid mechanical phrases such
   as "Introduced/Motions/Resolutions", "the document covers", and long committee lists.
+- Report the final outcome, not every procedural step. If a bill passed, say the bill
+  passed; do not list consideration motions, individual clauses, the enacting formula,
+  or the long title unless one of them was separately contested and consequential.
+- Identify exactly what each vote concerned. If a motion extending a committee's
+  reporting deadline was adopted, say the deadline was extended—do not describe the
+  underlying bill as adopted or the extension as negatived. Do not describe reports,
+  papers, or notifications as passed, adopted, or introduced unless the text explicitly
+  records that outcome for that item.
 - Begin every bullet with a short descriptive lead followed by a colon, for example
   "Bill passed:" or "Schedule changed:". Make that lead specific to the event.
 - Scan the entire document, including its final pages, before selecting bullets.
@@ -134,8 +142,7 @@ Rules:
   procedure or adjournment last. For a Revised List of Business, rank the most
   consequential change from the original first.
 - End every factual bullet with the supporting PDF page, such as (p. 3).
-- You may add a short plain-English significance sentence, but label it "Context:" and
-  keep it limited to what follows directly from the document.
+- Do not add a Context, significance, or "Why it matters" section.
 - If the text is insufficient, say so explicitly.
 - Start the response immediately with the first "- " bullet.
 - Return only the reader-facing bullets and optional Context sentence. Never output
@@ -178,7 +185,6 @@ def clean_model_output(text):
     cleaned = re.sub(r"```(?:markdown)?|```", "", cleaned, flags=re.IGNORECASE)
     cleaned = cleaned.replace("**", "")
     bullets = []
-    context = None
     for raw_line in cleaned.splitlines():
         line = raw_line.strip()
         numbered = re.match(r"^\d+[.)]\s+(.+)$", line)
@@ -188,10 +194,6 @@ def clean_model_output(text):
             line = "- " + line[2:]
         if line.startswith("- ") and len(bullets) < 6:
             bullets.append(line)
-        elif line.startswith("Context:") and context is None:
-            context = line
-    if context:
-        bullets.append(context)
     return "\n".join(bullets)
 
 
@@ -199,10 +201,9 @@ def validate_summary(text):
     """Allow only finished, cited bullets; reject reasoning and prose monologues."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     bullets = [line for line in lines if line.startswith(("- ", "• "))]
-    contexts = [line for line in lines if line.startswith("Context:")]
     if not 3 <= len(bullets) <= 6:
         raise ValueError("summary must contain 3-6 bullets")
-    if len(lines) != len(bullets) + len(contexts) or len(contexts) > 1:
+    if len(lines) != len(bullets):
         raise ValueError("summary contains non-bullet commentary")
     return "\n".join(lines)
 
@@ -228,23 +229,18 @@ def post_summary(client, job, summary):
 def format_summary_for_slack(summary):
     """Render readable Slack mrkdwn with bold leads and breathing room."""
     rendered = []
-    context = None
     for line in summary.splitlines():
         line = line.strip()
-        if line.startswith("Context:"):
-            context = line.removeprefix("Context:").strip()
-            continue
         if not line.startswith(("- ", "• ")):
             continue
         body = line[2:].strip()
+        body = re.sub(r"^\*([^*]+):\*\s*", r"\1: ", body)
         labelled = re.match(r"^([^:]{2,60}):\s*(.+)$", body)
         if labelled:
             body = f"*{labelled.group(1).strip()}:* {labelled.group(2).strip()}"
         rendered.append(f"• {body}")
 
     parts = ["*Summary — most important first*", "\n\n".join(rendered)]
-    if context:
-        parts.append(f"*Why it matters:* {context}")
     parts.append("_AI-generated locally; verify important details against the PDF._")
     return "\n\n".join(parts)[:3600]
 
