@@ -213,7 +213,7 @@ def clean_model_output(text):
     if "</think>" in cleaned.lower():
         cleaned = re.split(r"</think>", cleaned, flags=re.IGNORECASE)[-1]
     cleaned = re.sub(r"```(?:markdown)?|```", "", cleaned, flags=re.IGNORECASE)
-    cleaned = cleaned.replace("**", "")
+    cleaned = cleaned.replace("*", "")
     bullets = []
     for raw_line in cleaned.splitlines():
         line = raw_line.strip()
@@ -275,27 +275,75 @@ def post_summary(client, job, summary):
         raise ValueError("PDF message timestamp missing; refusing a standalone AI post")
     text = format_summary_for_slack(summary)
     client.chat_postMessage(
-        channel=job["channel"], text=text, thread_ts=job["thread_ts"]
+        channel=job["channel"],
+        text=text,
+        blocks=format_summary_blocks(summary),
+        thread_ts=job["thread_ts"],
     )
 
 
 def format_summary_for_slack(summary):
-    """Render readable Slack mrkdwn with bold leads and breathing room."""
+    """Create an asterisk-free plain-text fallback for Slack notifications."""
     rendered = []
     for line in summary.splitlines():
         line = line.strip()
         if not line.startswith(("- ", "• ")):
             continue
-        body = line[2:].strip()
-        body = re.sub(r"^\*([^*]+):\*\s*", r"\1: ", body)
-        labelled = re.match(r"^([^:]{2,60}):\s*(.+)$", body)
-        if labelled:
-            body = f"*{labelled.group(1).strip()}:* {labelled.group(2).strip()}"
+        body = line[2:].strip().replace("*", "")
         rendered.append(f"• {body}")
 
-    parts = ["*Summary — most important first*", "\n\n".join(rendered)]
-    parts.append("_AI-generated locally; verify important details against the PDF._")
+    parts = ["Summary — most important first", "\n\n".join(rendered)]
+    parts.append("AI-generated locally; verify important details against the PDF.")
     return "\n\n".join(parts)[:3600]
+
+
+def format_summary_blocks(summary):
+    """Use Slack rich-text styles so bold never depends on visible asterisks."""
+    items = []
+    for line in summary.splitlines():
+        line = line.strip()
+        if not line.startswith(("- ", "• ")):
+            continue
+        body = line[2:].strip().replace("*", "")
+        labelled = re.match(r"^([^:]{2,60}):\s*(.+)$", body)
+        elements = []
+        if labelled:
+            elements.append(
+                {
+                    "type": "text",
+                    "text": labelled.group(1).strip() + ":",
+                    "style": {"bold": True},
+                }
+            )
+            elements.append({"type": "text", "text": " " + labelled.group(2).strip()})
+        else:
+            elements.append({"type": "text", "text": body})
+        items.append({"type": "rich_text_section", "elements": elements})
+
+    return [
+        {
+            "type": "rich_text",
+            "elements": [
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {
+                            "type": "text",
+                            "text": "Summary — most important first",
+                            "style": {"bold": True},
+                        }
+                    ],
+                },
+                {"type": "rich_text_list", "style": "bullet", "elements": items},
+                {
+                    "type": "rich_text_section",
+                    "elements": [
+                        {"type": "text", "text": "\nAI-generated locally; verify important details against the PDF.", "style": {"italic": True}}
+                    ],
+                },
+            ],
+        }
+    ]
 
 
 def main():

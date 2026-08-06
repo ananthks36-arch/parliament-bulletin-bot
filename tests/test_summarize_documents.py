@@ -4,6 +4,7 @@ from summarize_documents import (
     build_prompt,
     clean_model_output,
     format_summary_for_slack,
+    format_summary_blocks,
     post_summary,
     outcome_evidence,
     source_excerpt,
@@ -75,15 +76,23 @@ class LocalSummaryTests(unittest.TestCase):
     def test_slack_format_bolds_leads_and_spaces_bullets(self):
         summary = "- Bill passed: Tax law amended. (p. 4)\n- Motion defeated: Ordinance remains. (p. 3)"
         rendered = format_summary_for_slack(summary)
-        self.assertIn("*Summary — most important first*", rendered)
-        self.assertIn("• *Bill passed:* Tax law amended. (p. 4)", rendered)
-        self.assertIn("\n\n• *Motion defeated:*", rendered)
+        self.assertIn("Summary — most important first", rendered)
+        self.assertIn("• Bill passed: Tax law amended. (p. 4)", rendered)
+        self.assertIn("\n\n• Motion defeated:", rendered)
         self.assertNotIn("Why it matters", rendered)
+        self.assertNotIn("*", rendered)
 
     def test_slack_format_does_not_double_bold_existing_lead(self):
         rendered = format_summary_for_slack("- *Bill passed:* Tax law amended.")
-        self.assertIn("• *Bill passed:* Tax law amended.", rendered)
-        self.assertNotIn("**Bill passed", rendered)
+        self.assertIn("• Bill passed: Tax law amended.", rendered)
+        self.assertNotIn("*", rendered)
+
+    def test_rich_text_blocks_bold_lead_without_asterisks(self):
+        blocks = format_summary_blocks("- Bill passed: Tax law amended.")
+        lead = blocks[0]["elements"][1]["elements"][0]["elements"][0]
+        self.assertEqual(lead["text"], "Bill passed:")
+        self.assertEqual(lead["style"], {"bold": True})
+        self.assertNotIn("*", str(blocks))
 
     def test_context_is_removed_from_model_output(self):
         raw = "- Bill passed.\n- Motion defeated.\n- Policy announced.\nContext: Extra interpretation."
