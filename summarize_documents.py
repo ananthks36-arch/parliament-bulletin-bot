@@ -119,6 +119,11 @@ Rules:
 - Use only the supplied document text. Do not invent names, events, outcomes, or context.
 - Give 4-6 concise, single-line bullets in strict descending importance—not
   document/page order. Do not use sub-bullets.
+- Write for an intelligent reader who does not know parliamentary jargon. Use active
+  voice, short sentences, and concrete consequences. Avoid mechanical phrases such
+  as "Introduced/Motions/Resolutions", "the document covers", and long committee lists.
+- Begin every bullet with a short descriptive lead followed by a colon, for example
+  "Bill passed:" or "Schedule changed:". Make that lead specific to the event.
 - Scan the entire document, including its final pages, before selecting bullets.
   Explicitly look for "passed", "adopted", "negatived", "introduced", bills,
   statutory resolutions, and binding decisions; do not omit these in favour of
@@ -214,10 +219,34 @@ def text_from_url(url):
 def post_summary(client, job, summary):
     if not job.get("thread_ts"):
         raise ValueError("PDF message timestamp missing; refusing a standalone AI post")
-    text = f"*AI-generated local summary — verify against the attached PDF*\n{summary[:3600]}"
+    text = format_summary_for_slack(summary)
     client.chat_postMessage(
         channel=job["channel"], text=text, thread_ts=job["thread_ts"]
     )
+
+
+def format_summary_for_slack(summary):
+    """Render readable Slack mrkdwn with bold leads and breathing room."""
+    rendered = []
+    context = None
+    for line in summary.splitlines():
+        line = line.strip()
+        if line.startswith("Context:"):
+            context = line.removeprefix("Context:").strip()
+            continue
+        if not line.startswith(("- ", "• ")):
+            continue
+        body = line[2:].strip()
+        labelled = re.match(r"^([^:]{2,60}):\s*(.+)$", body)
+        if labelled:
+            body = f"*{labelled.group(1).strip()}:* {labelled.group(2).strip()}"
+        rendered.append(f"• {body}")
+
+    parts = ["*Summary — most important first*", "\n\n".join(rendered)]
+    if context:
+        parts.append(f"*Why it matters:* {context}")
+    parts.append("_AI-generated locally; verify important details against the PDF._")
+    return "\n\n".join(parts)[:3600]
 
 
 def main():

@@ -3,6 +3,7 @@ import unittest
 from summarize_documents import (
     build_prompt,
     clean_model_output,
+    format_summary_for_slack,
     post_summary,
     source_excerpt,
     validate_summary,
@@ -42,6 +43,14 @@ class LocalSummaryTests(unittest.TestCase):
     def test_clean_uncited_bullets_are_allowed(self):
         summary = "- Bill passed.\n- Motion defeated.\n- Policy announced.\n- House adjourned."
         self.assertEqual(validate_summary(summary), summary)
+
+    def test_slack_format_bolds_leads_and_spaces_bullets(self):
+        summary = "- Bill passed: Tax law amended. (p. 4)\n- Motion defeated: Ordinance remains. (p. 3)\nContext: These were the main outcomes."
+        rendered = format_summary_for_slack(summary)
+        self.assertIn("*Summary — most important first*", rendered)
+        self.assertIn("• *Bill passed:* Tax law amended. (p. 4)", rendered)
+        self.assertIn("\n\n• *Motion defeated:*", rendered)
+        self.assertIn("*Why it matters:* These were the main outcomes.", rendered)
 
     def test_revised_list_prompt_requires_evidenced_comparison(self):
         job = {
