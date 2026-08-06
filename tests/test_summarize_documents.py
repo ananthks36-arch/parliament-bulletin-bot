@@ -1,9 +1,23 @@
 import unittest
 
-from summarize_documents import build_prompt, source_excerpt
+from summarize_documents import build_prompt, clean_model_output, post_summary, source_excerpt
 
 
 class LocalSummaryTests(unittest.TestCase):
+    def test_prompt_requires_importance_ranking(self):
+        job = {"house": "Lok Sabha", "label": "Bulletin-I", "date": "06-08-2026"}
+        prompt = build_prompt(job, "[Page 1]\nProceedings")
+        self.assertIn("strict descending importance", prompt)
+        self.assertIn("binding decisions first", prompt)
+
+    def test_hidden_reasoning_is_removed(self):
+        raw = "<think>private reasoning</think>\n- Bill passed. (p. 4)"
+        self.assertEqual(clean_model_output(raw), "- Bill passed. (p. 4)")
+
+    def test_standalone_summary_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "refusing a standalone"):
+            post_summary(object(), {"channel": "C123"}, "- Summary. (p. 1)")
+
     def test_revised_list_prompt_requires_evidenced_comparison(self):
         job = {
             "house": "Lok Sabha",

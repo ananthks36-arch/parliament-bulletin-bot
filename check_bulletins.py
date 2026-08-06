@@ -51,9 +51,8 @@ WANTED_NAME_SUBSTRINGS = ("list of business", "bulletin")
 LOOKAHEAD_DAYS = 3
 LOOKBACK_DAYS = 3
 REHASH_SIMILARITY_THRESHOLD = 0.99
-# The user wants official documents only in Slack. Keep the summarizer code available
-# for manual/local use, but never queue or post model-generated commentary automatically.
-AUTOMATIC_SUMMARIES_ENABLED = False
+# Post concise summaries only as replies beneath their official PDFs.
+AUTOMATIC_SUMMARIES_ENABLED = True
 
 
 def parse_document_date(value, fallback):

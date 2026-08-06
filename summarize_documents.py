@@ -7,6 +7,7 @@ are retried on a later poll; PDF delivery is never blocked by summarization.
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -114,12 +115,18 @@ Task: {task}
 
 Rules:
 - Use only the supplied document text. Do not invent names, events, outcomes, or context.
-- Give 4-8 concise bullets, ordered by importance.
+- Give 4-8 concise bullets in strict descending importance—not document/page order.
+- Rank passed/defeated/introduced bills and binding decisions first; then substantive
+  motions and resolutions; major policy, financial, or regulatory matters; important
+  committee findings; ministerial statements; matters raised by members; and routine
+  procedure or adjournment last. For a Revised List of Business, rank the most
+  consequential change from the original first.
 - End every factual bullet with the supporting PDF page, such as (p. 3).
 - You may add a short plain-English significance sentence, but label it "Context:" and
   keep it limited to what follows directly from the document.
 - If the text is insufficient, say so explicitly.
-- Do not include a heading, preamble, or hidden reasoning.
+- Return only the reader-facing bullets and optional Context sentence. Never output
+  analysis, chain-of-thought, <think> tags, a heading, or a preamble.
 
 CURRENT/REVISED DOCUMENT:
 {source_excerpt(document_text)}{original_section}
@@ -139,7 +146,16 @@ def generate_summary(prompt):
         timeout=900,
     )
     response.raise_for_status()
-    return response.json().get("response", "").strip()
+    return clean_model_output(response.json().get("response", ""))
+
+
+def clean_model_output(text):
+    """Remove any reasoning markup before text can reach Slack."""
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    if "</think>" in cleaned.lower():
+        cleaned = re.split(r"</think>", cleaned, flags=re.IGNORECASE)[-1]
+    cleaned = re.sub(r"```(?:markdown)?|```", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 def text_from_url(url):
@@ -152,11 +168,12 @@ def text_from_url(url):
 
 
 def post_summary(client, job, summary):
+    if not job.get("thread_ts"):
+        raise ValueError("PDF message timestamp missing; refusing a standalone AI post")
     text = f"*AI-generated local summary — verify against the attached PDF*\n{summary[:3600]}"
-    kwargs = {"channel": job["channel"], "text": text}
-    if job.get("thread_ts"):
-        kwargs["thread_ts"] = job["thread_ts"]
-    client.chat_postMessage(**kwargs)
+    client.chat_postMessage(
+        channel=job["channel"], text=text, thread_ts=job["thread_ts"]
+    )
 
 
 def main():
