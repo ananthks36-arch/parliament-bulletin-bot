@@ -31,6 +31,9 @@ OUTCOME_LINE = re.compile(
     r"\b(passed|adopted|negatived|rejected|defeated|withdrawn|extended)\b",
     re.IGNORECASE,
 )
+CONTEXT_LABEL = re.compile(
+    r"^(context|why it matters|significance)\s*:", re.IGNORECASE
+)
 
 
 def extract_pdf_text(pdf_bytes):
@@ -222,6 +225,8 @@ def clean_model_output(text):
             line = "- " + numbered.group(1)
         elif line.startswith("• "):
             line = "- " + line[2:]
+        if line.startswith("- ") and CONTEXT_LABEL.match(line[2:].strip()):
+            continue
         if line.startswith("- ") and len(bullets) < 6:
             bullets.append(line)
     return "\n".join(bullets)
@@ -290,6 +295,8 @@ def format_summary_for_slack(summary):
         if not line.startswith(("- ", "• ")):
             continue
         body = line[2:].strip().replace("*", "")
+        if CONTEXT_LABEL.match(body):
+            continue
         rendered.append(f"• {body}")
 
     parts = ["Summary — most important first", "\n\n".join(rendered)]
@@ -305,6 +312,8 @@ def format_summary_blocks(summary):
         if not line.startswith(("- ", "• ")):
             continue
         body = line[2:].strip().replace("*", "")
+        if CONTEXT_LABEL.match(body):
+            continue
         labelled = re.match(r"^([^:]{2,60}):\s*(.+)$", body)
         elements = []
         if labelled:

@@ -98,6 +98,16 @@ class LocalSummaryTests(unittest.TestCase):
         raw = "- Bill passed.\n- Motion defeated.\n- Policy announced.\nContext: Extra interpretation."
         self.assertNotIn("Context:", clean_model_output(raw))
 
+    def test_context_bullet_is_removed_from_model_output(self):
+        raw = "- Bill passed.\n- Motion defeated.\n- Policy announced.\n- Context: Extra interpretation."
+        self.assertNotIn("Context:", clean_model_output(raw))
+
+    def test_context_bullet_is_removed_from_rich_text(self):
+        blocks = format_summary_blocks(
+            "- Bill passed: Tax law amended.\n- Context: Generic explanation."
+        )
+        self.assertNotIn("Context", str(blocks))
+
     def test_revised_list_prompt_requires_evidenced_comparison(self):
         job = {
             "house": "Lok Sabha",
