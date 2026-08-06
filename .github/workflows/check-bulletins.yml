@@ -47,14 +47,14 @@ jobs:
           git push
 
       - name: Restore local Qwen model cache
-        if: steps.detect.outputs.needs_summary == 'true'
+        if: ${{ false }} # AI commentary disabled; deliver official PDFs only.
         uses: actions/cache@v4
         with:
           path: ~/.ollama/models
           key: ollama-qwen3-4b-q4-v1
 
       - name: Start local Qwen summarizer and OCR tools
-        if: steps.detect.outputs.needs_summary == 'true'
+        if: ${{ false }} # AI commentary disabled; deliver official PDFs only.
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq poppler-utils tesseract-ocr
@@ -67,7 +67,7 @@ jobs:
           ollama pull qwen3:4b
 
       - name: Generate and post local summaries
-        if: steps.detect.outputs.needs_summary == 'true'
+        if: ${{ false }} # AI commentary disabled; deliver official PDFs only.
         env:
           SLACK_BOT_TOKEN: ${{ secrets.PARLIAMENT_SLACK_BOT_TOKEN }}
           SUMMARY_MODEL: qwen3:4b

@@ -51,6 +51,9 @@ WANTED_NAME_SUBSTRINGS = ("list of business", "bulletin")
 LOOKAHEAD_DAYS = 3
 LOOKBACK_DAYS = 3
 REHASH_SIMILARITY_THRESHOLD = 0.99
+# The user wants official documents only in Slack. Keep the summarizer code available
+# for manual/local use, but never queue or post model-generated commentary automatically.
+AUTOMATIC_SUMMARIES_ENABLED = False
 
 
 def parse_document_date(value, fallback):
@@ -209,7 +212,11 @@ def main():
     state = load_state()
     posted_urls = list(state["posted_urls"])
     posted = set(posted_urls)
-    pending_summaries = list(state.get("pending_summaries", []))
+    pending_summaries = (
+        list(state.get("pending_summaries", []))
+        if AUTOMATIC_SUMMARIES_ENABLED
+        else []
+    )
     pending_urls = {job["url"] for job in pending_summaries}
     posted_documents = dict(state.get("posted_documents", {}))
 
@@ -311,7 +318,11 @@ def main():
                 found_new = True
                 print(f"  posted to Slack as {filename}")
 
-                if should_summarize(label) and url not in pending_urls:
+                if (
+                    AUTOMATIC_SUMMARIES_ENABLED
+                    and should_summarize(label)
+                    and url not in pending_urls
+                ):
                     pending_summaries.append(
                         {
                             "url": url,
