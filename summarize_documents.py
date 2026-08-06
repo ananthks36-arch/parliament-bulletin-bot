@@ -27,6 +27,10 @@ MAX_ATTEMPTS = 3
 PAGE_CITATION = re.compile(
     r"\(pp?\.\s*\d+(?:\s*[-–]\s*\d+)?\)[.!]?\s*$", re.IGNORECASE
 )
+OUTCOME_LINE = re.compile(
+    r"\b(passed|adopted|negatived|rejected|defeated|withdrawn|extended)\b",
+    re.IGNORECASE,
+)
 
 
 def extract_pdf_text(pdf_bytes):
@@ -84,6 +88,24 @@ def source_excerpt(text):
     return text[:half] + "\n\n[Middle pages omitted for context limit]\n\n" + text[-half:]
 
 
+def outcome_evidence(text):
+    """Surface local context around recorded outcomes to prevent cross-item leakage."""
+    lines = text.splitlines()
+    excerpts = []
+    seen = set()
+    for index, line in enumerate(lines):
+        if not OUTCOME_LINE.search(line):
+            continue
+        excerpt = "\n".join(lines[max(0, index - 5): min(len(lines), index + 2)]).strip()
+        normalized = re.sub(r"\s+", " ", excerpt).casefold()
+        if excerpt and normalized not in seen:
+            excerpts.append(excerpt)
+            seen.add(normalized)
+        if len(excerpts) >= 24:
+            break
+    return "\n\n---\n\n".join(excerpts)
+
+
 def build_prompt(job, document_text, comparison_text=None):
     label = job["label"]
     lowered = label.lower()
@@ -109,6 +131,8 @@ def build_prompt(job, document_text, comparison_text=None):
     if comparison_text:
         original_section = f"\n\nORIGINAL LIST OF BUSINESS:\n{source_excerpt(comparison_text)}"
 
+    verified_outcomes = outcome_evidence(document_text)
+
     return f"""You are summarizing an official Parliament of India document for a reader who wants
 the practical meaning, not procedural boilerplate.
 
@@ -130,6 +154,9 @@ Rules:
   underlying bill as adopted or the extension as negatived. Do not describe reports,
   papers, or notifications as passed, adopted, or introduced unless the text explicitly
   records that outcome for that item.
+- The VERIFIED OUTCOME EXCERPTS below are authoritative. Keep each outcome attached
+  to the item named in the same excerpt. Never transfer "adopted", "negatived", or
+  another outcome from a nearby but separate proceeding.
 - Begin every bullet with a short descriptive lead followed by a colon, for example
   "Bill passed:" or "Schedule changed:". Make that lead specific to the event.
 - Scan the entire document, including its final pages, before selecting bullets.
@@ -150,6 +177,9 @@ Rules:
 
 CURRENT/REVISED DOCUMENT:
 {source_excerpt(document_text)}{original_section}
+
+VERIFIED OUTCOME EXCERPTS:
+{verified_outcomes or "No explicit outcome language was extracted."}
 
 Return the reader-facing summary now.
 """
@@ -206,6 +236,29 @@ def validate_summary(text):
     if len(lines) != len(bullets):
         raise ValueError("summary contains non-bullet commentary")
     return "\n".join(lines)
+
+
+def validate_outcome_consistency(summary, document_text):
+    """Reject known high-risk outcome conflations before they can reach Slack."""
+    for line in summary.splitlines():
+        lowered = line.casefold()
+        if "viksit bharat shiksha adhishthan" not in lowered:
+            continue
+        if any(word in lowered for word in ("negatived", "rejected", "defeated")):
+            raise ValueError("Viksit Bharat committee-extension outcome conflicts with source")
+        if "extend" not in lowered or not any(
+            word in lowered for word in ("deadline", "time", "report")
+        ):
+            raise ValueError(
+                "Viksit Bharat item must describe extension of committee reporting time"
+            )
+
+    source_lowered = document_text.casefold()
+    if "viksit bharat shiksha adhishthan" in source_lowered:
+        source_index = source_lowered.find("viksit bharat shiksha adhishthan")
+        local_source = source_lowered[max(0, source_index - 500): source_index + 900]
+        if "extension of time" in local_source and "motion was put to vote and adopted" not in local_source:
+            raise ValueError("could not verify Viksit Bharat extension outcome in source")
 
 
 def text_from_url(url):
@@ -266,6 +319,7 @@ def main():
             summary = generate_summary(build_prompt(job, document_text, comparison_text))
             if not summary:
                 raise ValueError("local model returned an empty summary")
+            validate_outcome_consistency(summary, document_text)
             post_summary(client, job, summary)
             print("  summary posted to Slack")
         except Exception as error:

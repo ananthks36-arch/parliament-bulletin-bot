@@ -5,8 +5,10 @@ from summarize_documents import (
     clean_model_output,
     format_summary_for_slack,
     post_summary,
+    outcome_evidence,
     source_excerpt,
     validate_summary,
+    validate_outcome_consistency,
 )
 
 
@@ -18,6 +20,30 @@ class LocalSummaryTests(unittest.TestCase):
         self.assertIn("binding decisions first", prompt)
         self.assertIn("If a bill passed, say the bill", prompt)
         self.assertIn("reporting deadline was adopted", prompt)
+
+    def test_prompt_surfaces_authoritative_outcome_context(self):
+        job = {"house": "Lok Sabha", "label": "Bulletin-I", "date": "06-08-2026"}
+        source = "Motion regarding Bill — Extension of Time\nThe motion was put to vote and adopted."
+        prompt = build_prompt(job, source)
+        self.assertIn("VERIFIED OUTCOME EXCERPTS", prompt)
+        self.assertIn("motion was put to vote and adopted", prompt)
+
+    def test_outcome_evidence_keeps_nearby_item_context(self):
+        source = "Motion regarding Committee Extension\nMoved by Member\nThe motion was adopted."
+        evidence = outcome_evidence(source)
+        self.assertIn("Committee Extension", evidence)
+        self.assertIn("motion was adopted", evidence)
+
+    def test_viksit_bharat_wrong_outcome_is_blocked(self):
+        summary = "- Committee motion negatived: Viksit Bharat Shiksha Adhishthan Bill, 2025."
+        source = "Viksit Bharat Shiksha Adhishthan Bill, 2025 – Extension of Time\nThe motion was put to vote and adopted."
+        with self.assertRaisesRegex(ValueError, "conflicts with source"):
+            validate_outcome_consistency(summary, source)
+
+    def test_viksit_bharat_extension_wording_is_allowed(self):
+        summary = "- Committee deadline extended: Time for the report on the Viksit Bharat Shiksha Adhishthan Bill, 2025 was extended."
+        source = "Viksit Bharat Shiksha Adhishthan Bill, 2025 – Extension of Time\nThe motion was put to vote and adopted."
+        validate_outcome_consistency(summary, source)
 
     def test_hidden_reasoning_is_removed(self):
         raw = "<think>private reasoning</think>\n- Bill passed. (p. 4)"
