@@ -230,16 +230,5 @@
       "text_fingerprint": "5889a1252317f075b6d0039d4b7eef9e6c33b4c1a6f32a2d9e9fa07303c66980"
     }
   },
-  "pending_summaries": [
-    {
-      "url": "https://sansad.in/getFile/dms/fetch/0cfa058b-2c1f-440a-92ce-e2a8b3033ba7?source=dsp2",
-      "comparison_url": null,
-      "house": "Lok Sabha",
-      "label": "Bulletin-I",
-      "date": "07-08-2026",
-      "channel": "C0BKJQ3TA06",
-      "thread_ts": null,
-      "attempts": 2
-    }
-  ]
+  "pending_summaries": []
 }
