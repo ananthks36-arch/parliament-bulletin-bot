@@ -116,8 +116,12 @@ def build_prompt(job, document_text, comparison_text=None):
         task = (
             "Compare the REVISED document with the ORIGINAL List of Business. State "
             "the meaningful additions, removals, reordered items, and timing changes. "
-            "Then explain in plain English what members or observers should pay "
-            "attention to. If a difference is not evidenced, do not claim it."
+            "Cover every major section added by the revision, grouping related committee "
+            "reports into readable themes rather than omitting them. Say which major parts "
+            "of the original schedule remain unchanged. Then explain in plain English what "
+            "members or observers should pay attention to. A listed bill or motion is only "
+            "scheduled business, not an event that has already happened. If a difference "
+            "is not evidenced, do not claim it."
         )
     elif "part-ii" in lowered or "bulletin-ii" in lowered or "bulletin part-ii" in lowered:
         task = (
@@ -271,6 +275,74 @@ def validate_outcome_consistency(summary, document_text):
             raise ValueError("could not verify Viksit Bharat extension outcome in source")
 
 
+def validate_revised_list_completeness(summary, document_text, comparison_text=None):
+    """Reject revised-agenda summaries that omit whole added sections or imply outcomes."""
+    if not comparison_text:
+        return
+
+    source = document_text.casefold()
+    original = comparison_text.casefold()
+    rendered = summary.casefold()
+    bullets = [line for line in summary.splitlines() if line.strip().startswith(("- ", "• "))]
+
+    # A substantially expanded agenda cannot be represented faithfully by one or two
+    # bullets. This is deliberately based on source size, not a fixed document type.
+    if len(document_text) > len(comparison_text) * 1.25 and len(bullets) < 4:
+        raise ValueError("expanded revised list needs at least four substantive bullets")
+
+    if not any(word in rendered for word in ("added", "expanded", "revised", "changed")):
+        raise ValueError("revised-list summary does not identify the schedule change")
+
+    added_sections = (
+        (("reports of the department", "report of the committee"), ("committee", "report"), "committee reports"),
+        (("statements by ministers",), ("minister", "implementation statement"), "ministerial statements"),
+        (("motion for election",), ("election",), "election motions"),
+    )
+    for source_markers, summary_markers, description in added_sections:
+        added = any(marker in source for marker in source_markers) and not any(
+            marker in original for marker in source_markers
+        )
+        if added and not any(marker in rendered for marker in summary_markers):
+            raise ValueError(f"revised-list summary omits added {description}")
+
+    private_business_markers = (
+        "private members’ legislative business",
+        "private members' legislative business",
+    )
+    if any(marker in source for marker in private_business_markers) and any(
+        marker in original for marker in private_business_markers
+    ):
+        if not any(word in rendered for word in ("unchanged", "remains", "retained")):
+            raise ValueError("summary must say retained private-members' business is unchanged")
+        if re.search(r"\b(?:bills? (?:were )?(?:introduced|passed|adopted)|new bills?)\b", rendered):
+            raise ValueError("scheduled private-members' bills were described as completed outcomes")
+
+    if any(not PAGE_CITATION.search(line.strip()) for line in bullets):
+        raise ValueError("every revised-list bullet must cite its supporting PDF page")
+
+
+def generate_validated_summary(job, document_text, comparison_text=None, max_drafts=3):
+    """Regenerate locally with specific feedback when a draft fails a safety gate."""
+    prompt = build_prompt(job, document_text, comparison_text)
+    last_error = None
+    for draft_number in range(1, max_drafts + 1):
+        summary = generate_summary(prompt)
+        try:
+            validate_outcome_consistency(summary, document_text)
+            validate_revised_list_completeness(summary, document_text, comparison_text)
+            return summary
+        except ValueError as error:
+            last_error = error
+            if draft_number < max_drafts:
+                prompt += (
+                    "\n\nREJECTED DRAFT FEEDBACK:\n"
+                    f"Your previous draft was rejected because: {error}. "
+                    "Regenerate the complete summary from the supplied documents and fix "
+                    "that omission. Return only the final bullets."
+                )
+    raise last_error
+
+
 def text_from_url(url):
     pdf_bytes = download_pdf(url)
     text = extract_pdf_text(pdf_bytes)
@@ -378,10 +450,9 @@ def main():
             comparison_text = None
             if job.get("comparison_url"):
                 comparison_text = text_from_url(job["comparison_url"])
-            summary = generate_summary(build_prompt(job, document_text, comparison_text))
+            summary = generate_validated_summary(job, document_text, comparison_text)
             if not summary:
                 raise ValueError("local model returned an empty summary")
-            validate_outcome_consistency(summary, document_text)
             post_summary(client, job, summary)
             print("  summary posted to Slack")
         except Exception as error:

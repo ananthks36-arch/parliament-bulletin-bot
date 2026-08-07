@@ -1,15 +1,18 @@
 import unittest
+from unittest.mock import patch
 
 from summarize_documents import (
     build_prompt,
     clean_model_output,
     format_summary_for_slack,
     format_summary_blocks,
+    generate_validated_summary,
     post_summary,
     outcome_evidence,
     source_excerpt,
     validate_summary,
     validate_outcome_consistency,
+    validate_revised_list_completeness,
 )
 
 
@@ -131,6 +134,72 @@ class LocalSummaryTests(unittest.TestCase):
         self.assertIn("ORIGINAL LIST OF BUSINESS", prompt)
         self.assertIn("do not claim it", prompt)
         self.assertIn("supporting PDF page", prompt)
+        self.assertIn("every major section added", prompt)
+        self.assertIn("remain unchanged", prompt)
+
+    def test_expanded_revised_list_requires_complete_section_coverage(self):
+        original = "PRIVATE MEMBERS’ LEGISLATIVE BUSINESS\n" + ("Bill item. " * 100)
+        revised = (
+            "REPORTS OF THE DEPARTMENT RELATED PARLIAMENTARY COMMITTEE\n"
+            "STATEMENTS BY MINISTERS\nMOTION FOR ELECTION\n"
+            "PRIVATE MEMBERS’ LEGISLATIVE BUSINESS\n" + ("Agenda item. " * 300)
+        )
+        incomplete = (
+            "- Schedule expanded: Morning business was added. (p. 1)\n"
+            "- Committee reports: Several reports were listed. (p. 2)\n"
+            "- Ministerial statements: Ministers will make statements. (p. 5)\n"
+            "- Private members' business: The afternoon schedule remains unchanged. (p. 8)"
+        )
+
+        with self.assertRaisesRegex(ValueError, "election motions"):
+            validate_revised_list_completeness(incomplete, revised, original)
+
+    def test_complete_revised_list_summary_is_allowed(self):
+        original = "PRIVATE MEMBERS’ LEGISLATIVE BUSINESS\n" + ("Bill item. " * 100)
+        revised = (
+            "REPORTS OF THE DEPARTMENT RELATED PARLIAMENTARY COMMITTEE\n"
+            "STATEMENTS BY MINISTERS\nMOTION FOR ELECTION\n"
+            "PRIVATE MEMBERS’ LEGISLATIVE BUSINESS\n" + ("Agenda item. " * 300)
+        )
+        summary = (
+            "- Schedule expanded: Fifteen morning items were added. (p. 1)\n"
+            "- Committee reports: Major reports were scheduled. (p. 2)\n"
+            "- Ministerial statements: Implementation statements were listed. (p. 5)\n"
+            "- Election motions: Three board elections were scheduled. (p. 6)\n"
+            "- Private members' business: The afternoon schedule remains unchanged. (p. 8)"
+        )
+
+        validate_revised_list_completeness(summary, revised, original)
+
+    @patch("summarize_documents.generate_summary")
+    def test_failed_draft_is_regenerated_with_validation_feedback(self, mock_generate):
+        original = "PRIVATE MEMBERS’ LEGISLATIVE BUSINESS\n" + ("Bill item. " * 100)
+        revised = (
+            "REPORTS OF THE DEPARTMENT RELATED PARLIAMENTARY COMMITTEE\n"
+            "STATEMENTS BY MINISTERS\nMOTION FOR ELECTION\n"
+            "PRIVATE MEMBERS’ LEGISLATIVE BUSINESS\n" + ("Agenda item. " * 300)
+        )
+        complete = (
+            "- Schedule expanded: Morning business was added. (p. 1)\n"
+            "- Committee reports: Reports were scheduled. (p. 2)\n"
+            "- Ministerial statements: Statements were listed. (p. 5)\n"
+            "- Election motions: Board elections were scheduled. (p. 6)\n"
+            "- Private members' business: The afternoon remains unchanged. (p. 8)"
+        )
+        mock_generate.side_effect = [
+            "- Schedule revised: One item changed. (p. 1)",
+            complete,
+        ]
+
+        result = generate_validated_summary(
+            {"house": "Rajya Sabha", "label": "Revised List of Business", "date": "07-08-2026"},
+            revised,
+            original,
+        )
+
+        self.assertEqual(result, complete)
+        self.assertEqual(mock_generate.call_count, 2)
+        self.assertIn("REJECTED DRAFT FEEDBACK", mock_generate.call_args.args[0])
 
     def test_long_source_keeps_beginning_and_end(self):
         text = "BEGIN" + ("x" * 80000) + "END"
