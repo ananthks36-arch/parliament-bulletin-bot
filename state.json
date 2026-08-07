@@ -103,7 +103,8 @@
     "https://sansad.in/getFile/UploadedFiles/TableOffice/Bulletin2/782026/English/Bull_07082026.pdf?source=rscms",
     "https://sansad.in/getFile/dms/fetch/0cfa058b-2c1f-440a-92ce-e2a8b3033ba7?source=dsp2",
     "https://sansad.in/getFile/dms/fetch/bdf3467b-7e9b-4712-91db-b033d4549c4e?source=dsp2",
-    "https://sansad.in/getFile/dms/fetch/bb246e25-18ed-4025-bafe-0307c4cb0a10?source=dsp2rs"
+    "https://sansad.in/getFile/dms/fetch/bb246e25-18ed-4025-bafe-0307c4cb0a10?source=dsp2rs",
+    "https://sansad.in/getFile/UploadedFiles/TableOffice/Bulletin2/782026/English/Bull2070826.pdf?source=rscms"
   ],
   "posted_documents": {
     "ls:2026-08-03:list-of-business": {
@@ -224,8 +225,8 @@
       "text_fingerprint": "c5b19c70b33594ca8d0be25cc3b796feabc8596c47c4a1e903723a9b480105c1"
     },
     "rs:2026-08-07:bulletin-part-ii": {
-      "url": "https://sansad.in/getFile/UploadedFiles/TableOffice/Bulletin2/782026/English/Bull_07082026.pdf?source=rscms",
-      "text_fingerprint": "2b997a9693c50d4a0cdab5fb07d5bb742b63178e2315bb7c539758dd9346c435"
+      "url": "https://sansad.in/getFile/UploadedFiles/TableOffice/Bulletin2/782026/English/Bull2070826.pdf?source=rscms",
+      "text_fingerprint": "024012183055495baf9030144c0296e28e7aa34c8075ee05cc681673d9e58bad"
     },
     "ls:2026-08-07:bulletin-i": {
       "url": "https://sansad.in/getFile/dms/fetch/0cfa058b-2c1f-440a-92ce-e2a8b3033ba7?source=dsp2",
@@ -240,16 +241,5 @@
       "text_fingerprint": "489dea6fc7a7faaf05fd767aa66f1d0f43051b43c7e5dacbf73dd11ac41f9445"
     }
   },
-  "pending_summaries": [
-    {
-      "url": "https://sansad.in/getFile/dms/fetch/bb246e25-18ed-4025-bafe-0307c4cb0a10?source=dsp2rs",
-      "comparison_url": null,
-      "house": "Rajya Sabha",
-      "label": "Bulletin Part-I",
-      "date": "07-08-2026",
-      "channel": "C0BKJQ3TA06",
-      "thread_ts": "1786107208.275309",
-      "attempts": 2
-    }
-  ]
+  "pending_summaries": []
 }
