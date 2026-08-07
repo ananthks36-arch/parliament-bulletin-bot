@@ -80,6 +80,30 @@ class DocumentExtractionTests(unittest.TestCase):
 
         self.assertEqual(get_upload_message_ts(response), "1234567890.123456")
 
+    def test_recovers_upload_timestamp_from_channel_history(self):
+        class FakeClient:
+            def files_info(self, file):
+                self.file = file
+                return {"file": {"id": file}}
+
+            def conversations_history(self, channel, limit):
+                self.channel = channel
+                return {
+                    "messages": [
+                        {"ts": "9876.5432", "files": [{"id": "F123"}]},
+                    ]
+                }
+
+        client = FakeClient()
+        response = {"files": [{"id": "F123"}]}
+
+        self.assertEqual(
+            get_upload_message_ts(response, client, "C123"),
+            "9876.5432",
+        )
+        self.assertEqual(client.file, "F123")
+        self.assertEqual(client.channel, "C123")
+
     def test_rehash_with_tiny_text_noise_is_near_identical(self):
         original = " ".join(f"word-{index}" for index in range(3000))
         replacement = original.replace("word-1500", "word-1500 Indian", 1)

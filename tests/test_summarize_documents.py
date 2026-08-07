@@ -12,6 +12,7 @@ from summarize_documents import (
     source_excerpt,
     validate_summary,
     validate_outcome_consistency,
+    validate_document_completeness,
     validate_revised_list_completeness,
 )
 
@@ -64,6 +65,28 @@ class LocalSummaryTests(unittest.TestCase):
     def test_short_bulletin_two_summary_is_allowed(self):
         summary = "- Resolution notice: A member gave notice of a proposed resolution.\n- Committee nominations: Three members were nominated."
         self.assertEqual(validate_summary(summary), summary)
+
+    def test_bulletin_one_rejects_empty_categories_and_missing_pages(self):
+        job = {"house": "Lok Sabha", "label": "Bulletin-I", "date": "07-08-2026"}
+        source = "Government Bill - Passed\nThe Bill was passed.\nHouse adjourned."
+        malformed = "- Government Bill - Passed: The Bill was passed.\n- Committee Reports:"
+
+        with self.assertRaisesRegex(ValueError, "complete detail"):
+            validate_document_completeness(job, malformed, source)
+
+    def test_bulletin_one_requires_passed_bill_and_adjournment(self):
+        job = {"house": "Lok Sabha", "label": "Bulletin-I", "date": "07-08-2026"}
+        source = "Government Bill - Passed\nThe Bill was passed.\nHouse adjourned."
+        incomplete = "- Committee reports: Reports were presented. (p. 8)"
+
+        with self.assertRaisesRegex(ValueError, "passed government bill"):
+            validate_document_completeness(job, incomplete, source)
+
+        complete = (
+            "- Bill passed: The MSME amendment was passed. (p. 18)\n"
+            "- House adjourned: The House adjourned until Monday. (p. 18)"
+        )
+        validate_document_completeness(job, complete, source)
 
     def test_bulletin_two_prompt_distinguishes_notice_from_outcome(self):
         job = {"house": "Rajya Sabha", "label": "Bulletin Part-II", "date": "06-08-2026"}

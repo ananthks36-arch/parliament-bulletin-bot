@@ -321,6 +321,31 @@ def validate_revised_list_completeness(summary, document_text, comparison_text=N
         raise ValueError("every revised-list bullet must cite its supporting PDF page")
 
 
+def validate_document_completeness(job, summary, document_text):
+    """Reject empty category bullets and omissions of explicit Bulletin-I outcomes."""
+    bullets = [line.strip() for line in summary.splitlines() if line.strip().startswith(("- ", "• "))]
+    for line in bullets:
+        body = line[2:].strip()
+        labelled = re.match(r"^[^:]{2,60}:\s+\S.+", body)
+        if not labelled:
+            raise ValueError("every summary bullet needs a descriptive lead and complete detail")
+
+    lowered_label = job.get("label", "").casefold()
+    if "bulletin-i" not in lowered_label and "bulletin part-i" not in lowered_label:
+        return
+
+    if any(not PAGE_CITATION.search(line) for line in bullets):
+        raise ValueError("every Bulletin-I bullet must cite its supporting PDF page")
+
+    source = document_text.casefold()
+    rendered = summary.casefold()
+    if re.search(r"government bill\s*[-–—]\s*passed", source):
+        if "bill" not in rendered or "passed" not in rendered:
+            raise ValueError("Bulletin-I summary omits an explicitly passed government bill")
+    if "adjourned" in source and "adjourn" not in rendered:
+        raise ValueError("Bulletin-I summary omits the recorded adjournment")
+
+
 def generate_validated_summary(job, document_text, comparison_text=None, max_drafts=3):
     """Regenerate locally with specific feedback when a draft fails a safety gate."""
     prompt = build_prompt(job, document_text, comparison_text)
@@ -330,6 +355,7 @@ def generate_validated_summary(job, document_text, comparison_text=None, max_dra
         try:
             validate_outcome_consistency(summary, document_text)
             validate_revised_list_completeness(summary, document_text, comparison_text)
+            validate_document_completeness(job, summary, document_text)
             return summary
         except ValueError as error:
             last_error = error

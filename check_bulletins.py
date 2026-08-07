@@ -149,16 +149,48 @@ def post_to_slack(client, channel, filename, title, pdf_bytes):
     )
 
 
-def get_upload_message_ts(response):
-    """Best-effort extraction of the Slack message containing an uploaded file."""
-    file_info = response.get("file")
+def _message_ts_from_file_info(file_info):
+    """Extract the upload message timestamp from a Slack file object."""
     if not file_info:
-        files = response.get("files") or []
-        file_info = files[0] if files else {}
+        return None
     for visibility in ("public", "private"):
         for shares in (file_info.get("shares") or {}).get(visibility, {}).values():
             if shares and shares[0].get("ts"):
                 return shares[0]["ts"]
+    return None
+
+
+def get_upload_message_ts(response, client=None, channel=None):
+    """Resolve the Slack message containing an uploaded file across API variants."""
+    file_info = response.get("file")
+    if not file_info:
+        files = response.get("files") or []
+        file_info = files[0] if files else {}
+
+    direct_ts = _message_ts_from_file_info(file_info)
+    if direct_ts:
+        return direct_ts
+
+    file_id = file_info.get("id")
+    if not client or not file_id:
+        return None
+
+    try:
+        refreshed = client.files_info(file=file_id).get("file") or {}
+        refreshed_ts = _message_ts_from_file_info(refreshed)
+        if refreshed_ts:
+            return refreshed_ts
+    except SlackApiError as error:
+        print(f"  could not refresh Slack file details: {error.response['error']}")
+
+    if channel:
+        try:
+            history = client.conversations_history(channel=channel, limit=30)
+            for message in history.get("messages") or []:
+                if any(item.get("id") == file_id for item in message.get("files") or []):
+                    return message.get("ts")
+        except SlackApiError as error:
+            print(f"  could not search Slack channel history: {error.response['error']}")
     return None
 
 
@@ -334,7 +366,7 @@ def main():
                             "label": label,
                             "date": date_str,
                             "channel": channel,
-                            "thread_ts": get_upload_message_ts(upload),
+                            "thread_ts": get_upload_message_ts(upload, client, channel),
                             "attempts": 0,
                         }
                     )
