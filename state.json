@@ -104,7 +104,8 @@
     "https://sansad.in/getFile/dms/fetch/0cfa058b-2c1f-440a-92ce-e2a8b3033ba7?source=dsp2",
     "https://sansad.in/getFile/dms/fetch/bdf3467b-7e9b-4712-91db-b033d4549c4e?source=dsp2",
     "https://sansad.in/getFile/dms/fetch/bb246e25-18ed-4025-bafe-0307c4cb0a10?source=dsp2rs",
-    "https://sansad.in/getFile/UploadedFiles/TableOffice/Bulletin2/782026/English/Bull2070826.pdf?source=rscms"
+    "https://sansad.in/getFile/UploadedFiles/TableOffice/Bulletin2/782026/English/Bull2070826.pdf?source=rscms",
+    "https://sansad.in/getFile/dms/fetch/6e9b3341-afc5-4a17-8e0a-d8d8c4fe9b9f?source=dsp2rs"
   ],
   "posted_documents": {
     "ls:2026-08-03:list-of-business": {
@@ -239,6 +240,10 @@
     "rs:2026-08-07:bulletin-part-i": {
       "url": "https://sansad.in/getFile/dms/fetch/bb246e25-18ed-4025-bafe-0307c4cb0a10?source=dsp2rs",
       "text_fingerprint": "489dea6fc7a7faaf05fd767aa66f1d0f43051b43c7e5dacbf73dd11ac41f9445"
+    },
+    "rs:2026-08-10:list-of-business": {
+      "url": "https://sansad.in/getFile/dms/fetch/6e9b3341-afc5-4a17-8e0a-d8d8c4fe9b9f?source=dsp2rs",
+      "text_fingerprint": "19bd7502a540fdc5aefa5cd902554d78be4eb77dd785d3b7270e27cad17e6a08"
     }
   },
   "pending_summaries": []
