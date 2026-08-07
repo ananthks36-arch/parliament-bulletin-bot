@@ -55,8 +55,18 @@ class LocalSummaryTests(unittest.TestCase):
             post_summary(object(), {"channel": "C123"}, "- Summary. (p. 1)")
 
     def test_reasoning_monologue_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "3-6 bullets"):
+        with self.assertRaisesRegex(ValueError, "1-6 bullets"):
             validate_summary("Hmm, I need to decide what the user wants.")
+
+    def test_short_bulletin_two_summary_is_allowed(self):
+        summary = "- Resolution notice: A member gave notice of a proposed resolution.\n- Committee nominations: Three members were nominated."
+        self.assertEqual(validate_summary(summary), summary)
+
+    def test_bulletin_two_prompt_distinguishes_notice_from_outcome(self):
+        job = {"house": "Rajya Sabha", "label": "Bulletin Part-II", "date": "06-08-2026"}
+        prompt = build_prompt(job, "Dr John Brittas: to move the following resolution")
+        self.assertIn("'to move' does not mean", prompt)
+        self.assertIn("Never add filler", prompt)
 
     def test_cleaner_discards_prose_and_normalizes_numbered_bullets(self):
         raw = "Planning text\n1. Bill passed. (p. 4)\n2. Motion defeated. (p. 3)\n3. House adjourned. (p. 8)"

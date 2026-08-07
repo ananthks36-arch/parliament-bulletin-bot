@@ -122,7 +122,10 @@ def build_prompt(job, document_text, comparison_text=None):
     elif "part-ii" in lowered or "bulletin-ii" in lowered or "bulletin part-ii" in lowered:
         task = (
             "Summarize the important notices, deadlines, committee or member information, "
-            "and practical follow-ups. Explain their parliamentary significance briefly."
+            "and practical follow-ups. Distinguish advance notices and proposed motions "
+            "from actions already taken: wording such as 'to move' does not mean a motion "
+            "was moved, adopted, rejected, or decided. Never add filler saying that bills, "
+            "findings, or procedures are absent."
         )
     else:
         task = (
@@ -144,8 +147,10 @@ Task: {task}
 
 Rules:
 - Use only the supplied document text. Do not invent names, events, outcomes, or context.
-- Give 4-6 concise, single-line bullets in strict descending importance—not
-  document/page order. Do not use sub-bullets.
+- Give 1-6 concise, single-line bullets in strict descending importance—not
+  document/page order. Normally use 3-6, but use only 1 or 2 when the source contains
+  only 1 or 2 substantive items. Do not invent filler to reach a target. Do not use
+  sub-bullets.
 - Write for an intelligent reader who does not know parliamentary jargon. Use active
   voice, short sentences, and concrete consequences. Avoid mechanical phrases such
   as "Introduced/Motions/Resolutions", "the document covers", and long committee lists.
@@ -236,8 +241,8 @@ def validate_summary(text):
     """Allow only finished, cited bullets; reject reasoning and prose monologues."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     bullets = [line for line in lines if line.startswith(("- ", "• "))]
-    if not 3 <= len(bullets) <= 6:
-        raise ValueError("summary must contain 3-6 bullets")
+    if not 1 <= len(bullets) <= 6:
+        raise ValueError("summary must contain 1-6 bullets")
     if len(lines) != len(bullets):
         raise ValueError("summary contains non-bullet commentary")
     return "\n".join(lines)
