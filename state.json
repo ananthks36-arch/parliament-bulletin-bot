@@ -109,7 +109,8 @@
     "https://sansad.in/getFile/dms/fetch/a025c322-9823-442e-94ab-767fe659108f?source=dsp2rs",
     "https://sansad.in/getFile/dms/fetch/3589032f-9afc-4299-b32d-cc2c7901d5bb?source=dsp2",
     "https://sansad.in/getFile/dms/fetch/96a58501-9bc7-40eb-8618-413ebf1b3771?source=dsp2",
-    "https://sansad.in/getFile/dms/fetch/61ab7ee0-5975-463f-bd11-e49d2e9e6bcf?source=dsp2"
+    "https://sansad.in/getFile/dms/fetch/61ab7ee0-5975-463f-bd11-e49d2e9e6bcf?source=dsp2",
+    "https://sansad.in/getFile/dms/fetch/11230d8c-862e-40df-b89c-2d1dd3b47fd1?source=dsp2"
   ],
   "posted_documents": {
     "ls:2026-08-03:list-of-business": {
@@ -260,6 +261,10 @@
     "ls:2026-08-10:list-of-business": {
       "url": "https://sansad.in/getFile/dms/fetch/61ab7ee0-5975-463f-bd11-e49d2e9e6bcf?source=dsp2",
       "text_fingerprint": "1c666b48b18a7c8261a07d83131aa969bca0729de91170f1a4cd6e2c068cd526"
+    },
+    "ls:2026-08-11:list-of-business": {
+      "url": "https://sansad.in/getFile/dms/fetch/11230d8c-862e-40df-b89c-2d1dd3b47fd1?source=dsp2",
+      "text_fingerprint": "2749602a7486aae7ff718e2ab2818d1f8ab6d4abb0a0471e0634718841b190b6"
     }
   },
   "pending_summaries": []
